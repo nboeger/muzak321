@@ -384,6 +384,16 @@ func (p *Player) playCurrent() {
 		return
 	}
 
+	// Pre-fill the stream buffer with silence to prevent startup underflow
+	for i := 0; i < 4; i++ {
+		for j := range paBuf {
+			paBuf[j] = 0
+		}
+		if we := stream.Write(); we != nil && we != portaudio.OutputUnderflowed {
+			break
+		}
+	}
+
 	p.mu.Lock()
 	p.audioFile = audioFile
 	p.decoder = decoder
