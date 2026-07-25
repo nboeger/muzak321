@@ -56,8 +56,11 @@ func (s *Screen) Close() {
 	goncurses.End()
 }
 
+func (s *Screen) NeedResize() bool {
+	return goncurses.IsTermResized(s.rows, s.cols)
+}
+
 func (s *Screen) Resize() {
-	s.win.Clear()
 	s.updateSize()
 	goncurses.ResizeTerm(s.rows, s.cols)
 	s.updateSize()

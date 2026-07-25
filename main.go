@@ -7,11 +7,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/rthornton128/goncurses"
 )
+
+var resizePending int32
 
 func suppressStderr() {
 	null, _ := syscall.Open("/dev/null", syscall.O_WRONLY, 0)
@@ -121,6 +124,14 @@ func main() {
 		os.Exit(0)
 	}()
 
+	winchCh := make(chan os.Signal, 1)
+	signal.Notify(winchCh, syscall.SIGWINCH)
+	go func() {
+		for range winchCh {
+			atomic.StoreInt32(&resizePending, 1)
+		}
+	}()
+
 	if *fileArg != "" {
 		files, err := resolvePath(*fileArg)
 		if err != nil {
@@ -204,6 +215,7 @@ func printHelp() {
 
 func (a *App) runBrowser() {
 	for a.running {
+		a.handleResize()
 		entries := a.browser.Entries()
 		a.screen.Browser(entries, a.browser.Cursor(), a.browser.Scroll(), a.browser.Dir())
 		a.screen.Refresh()
@@ -257,6 +269,12 @@ func (a *App) runBrowser() {
 	}
 }
 
+func (a *App) handleResize() {
+	if atomic.SwapInt32(&resizePending, 0) != 0 || a.screen.NeedResize() {
+		a.screen.Resize()
+	}
+}
+
 func (a *App) renderPlayer() {
 	a.screen.Title(cleanFileName(a.player.CurrentFile()))
 	a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
@@ -273,6 +291,7 @@ func (a *App) runPlayer() {
 	defer eqTicker.Stop()
 
 	for a.running {
+		a.handleResize()
 		select {
 		case file := <-a.player.fileChanged:
 			a.screen.Title(cleanFileName(file))
