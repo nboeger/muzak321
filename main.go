@@ -5,11 +5,21 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/rthornton128/goncurses"
 )
+
+func suppressStderr() {
+	null, _ := syscall.Open("/dev/null", syscall.O_WRONLY, 0)
+	if null >= 0 {
+		syscall.Dup2(null, syscall.Stderr)
+		syscall.Close(null)
+	}
+}
 
 type App struct {
 	screen    *Screen
@@ -21,8 +31,73 @@ type App struct {
 	running   bool
 }
 
+func resolvePath(path string) ([]string, error) {
+	if strings.ContainsAny(path, "*?[") {
+		matches, err := filepath.Glob(path)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no files match: %s", path)
+		}
+		return expandFiles(matches)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.IsDir() {
+		var matches []string
+		err := filepath.Walk(path, func(p string, i os.FileInfo, err error) error {
+			if err != nil || i.IsDir() {
+				return err
+			}
+			ext := strings.ToLower(filepath.Ext(p))
+			if ext == ".mp3" || ext == ".m3u" {
+				matches = append(matches, p)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no audio files found in: %s", path)
+		}
+		return expandFiles(matches)
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".m3u" {
+		return parseM3U(path)
+	}
+	return []string{path}, nil
+}
+
+func expandFiles(paths []string) ([]string, error) {
+	var result []string
+	for _, p := range paths {
+		ext := strings.ToLower(filepath.Ext(p))
+		if ext == ".m3u" {
+			files, err := parseM3U(p)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, files...)
+		} else if ext == ".mp3" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no mp3 files found")
+	}
+	return result, nil
+}
+
 func main() {
-	m3uFile := flag.String("f", "", "M3U playlist file")
+	fileArg := flag.String("f", "", "MP3 file, playlist, directory, or glob pattern")
 	help := flag.Bool("h", false, "Show help")
 	shuffle := flag.Bool("s", false, "Shuffle playback")
 	flag.Parse()
@@ -33,45 +108,43 @@ func main() {
 	}
 
 	player := NewPlayer()
+	var screen *Screen
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 		player.Stop()
+		if screen != nil {
+			goncurses.End()
+		}
 		os.Exit(0)
 	}()
 
-	if *m3uFile != "" {
-		files, err := parseM3U(*m3uFile)
+	if *fileArg != "" {
+		files, err := resolvePath(*fileArg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading playlist: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		if len(files) == 0 {
-			fmt.Fprintln(os.Stderr, "No files found in playlist")
+			fmt.Fprintln(os.Stderr, "No files to play")
 			os.Exit(1)
 		}
 		player.SetFiles(files, *shuffle)
 		player.Start()
 		player.PlayCurrent()
 	} else {
-		screen, err := NewScreen()
+		var err error
+		screen, err = NewScreen()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing screen: %v\n", err)
 			os.Exit(1)
 		}
 		defer screen.Close()
-
-		go func() {
-			<-sigCh
-			screen.Close()
-			player.Stop()
-			os.Exit(0)
-		}()
+		suppressStderr()
 
 		browser := NewBrowser()
-
 		app := &App{
 			screen:    screen,
 			player:    player,
@@ -80,8 +153,7 @@ func main() {
 			running:   true,
 		}
 
-		err = browser.Navigate(".")
-		if err != nil {
+		if err = browser.Navigate("."); err != nil {
 			screen.Close()
 			fmt.Fprintf(os.Stderr, "Error reading directory: %v\n", err)
 			os.Exit(1)
@@ -91,19 +163,14 @@ func main() {
 		return
 	}
 
-	screen, err := NewScreen()
+	var err error
+	screen, err = NewScreen()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing screen: %v\n", err)
 		os.Exit(1)
 	}
 	defer screen.Close()
-
-	go func() {
-		<-sigCh
-		screen.Close()
-		player.Stop()
-		os.Exit(0)
-	}()
+	suppressStderr()
 
 	app := &App{
 		screen:  screen,
@@ -121,15 +188,17 @@ func printHelp() {
 	fmt.Println("muzak321 — MP3 Music Player")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  muzak321 -f <playlist.m3u>   Play an M3U playlist")
-	fmt.Println("  muzak321 -s                   Shuffle playback")
-	fmt.Println("  muzak321 -h                   Show this help")
-	fmt.Println("  muzak321                      File browser mode")
+	fmt.Println("  muzak321 -f <file.m3u|file.mp3>   Play a playlist or MP3 file")
+	fmt.Println("  muzak321 -s                        Shuffle playback")
+	fmt.Println("  muzak321 -h                        Show this help")
+	fmt.Println("  muzak321                           File browser mode")
 	fmt.Println()
 	fmt.Println("Controls:")
 	fmt.Println("  Space    Play / Pause")
 	fmt.Println("  M        Mute / Unmute")
-	fmt.Println("  N        Next track")
+	fmt.Println("  P/N      Prev / Next track")
+	fmt.Println("  Up/Down  Volume")
+	fmt.Println("  D        Audio device")
 	fmt.Println("  Q        Quit")
 }
 
@@ -159,11 +228,15 @@ func (a *App) runBrowser() {
 		case goncurses.KEY_ENTER, 13, 10:
 			done, err := a.browser.Enter()
 			if err != nil {
+				a.screen.Message(err.Error())
+				a.screen.GetKey()
 				continue
 			}
 			if done {
 				files := a.browser.SelectedFiles()
 				if len(files) == 0 {
+					a.screen.Message("empty playlist")
+					a.screen.GetKey()
 					continue
 				}
 				a.player = NewPlayer()
@@ -184,7 +257,7 @@ func (a *App) runBrowser() {
 func (a *App) renderPlayer() {
 	a.screen.Title(cleanFileName(a.player.CurrentFile()))
 	a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
-	a.screen.EQData([numEqualizerBars]float64{})
+	a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 	a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 }
 
@@ -201,7 +274,7 @@ func (a *App) runPlayer() {
 		case file := <-a.player.fileChanged:
 			a.screen.Title(cleanFileName(file))
 			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
-			a.screen.EQData([numEqualizerBars]float64{})
+			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(a.player.State(), file)
 			a.screen.Refresh()
 
@@ -209,6 +282,7 @@ func (a *App) runPlayer() {
 			_ = state
 			errMsg := a.player.Error()
 			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(state, a.player.CurrentFile(), errMsg)
 			a.screen.Refresh()
 			if state == StateStopped {
@@ -228,13 +302,9 @@ func (a *App) runPlayer() {
 				return
 			}
 
-		case data := <-a.player.eqChan:
-			a.screen.EQData(data)
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
 		case <-eqTicker.C:
 			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
@@ -304,6 +374,9 @@ func (a *App) runPlayer() {
 			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
+
+		case key == 'p' || key == 'P':
+			a.player.Previous()
 
 		case key == 'h' || key == 'H':
 			a.screen.ShowHelp()

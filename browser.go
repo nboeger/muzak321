@@ -188,6 +188,11 @@ func parseM3U(path string) ([]string, error) {
 		return nil, err
 	}
 
+	// Strip UTF-8 BOM if present
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
+	}
+
 	baseDir := filepath.Dir(path)
 	var files []string
 	lines := strings.Split(string(data), "\n")
@@ -195,6 +200,19 @@ func parseM3U(path string) ([]string, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Strip surrounding quotes (some M3U generators quote paths with spaces)
+		if len(line) > 1 {
+			if line[0] == '"' && line[len(line)-1] == '"' {
+				line = line[1 : len(line)-1]
+			} else if line[0] == '\'' && line[len(line)-1] == '\'' {
+				line = line[1 : len(line)-1]
+			}
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 

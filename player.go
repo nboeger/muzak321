@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/damonqin/portaudio"
@@ -22,18 +23,30 @@ var paAudioDevices []*portaudio.DeviceInfo
 
 func initPortAudio() error {
 	paInitOnce.Do(func() {
+		saved := -1
+		null, err := syscall.Open("/dev/null", syscall.O_WRONLY, 0)
+		if null >= 0 {
+			saved, _ = syscall.Dup(syscall.Stderr)
+			syscall.Dup2(null, syscall.Stderr)
+			syscall.Close(null)
+		}
+
 		paInitErr = portaudio.Initialize()
-		if paInitErr != nil {
-			return
-		}
-		devs, err := portaudio.Devices()
-		if err != nil {
-			return
-		}
-		for _, d := range devs {
-			if d.MaxOutputChannels > 0 {
-				paAudioDevices = append(paAudioDevices, d)
+		if paInitErr == nil {
+			devs, err := portaudio.Devices()
+			if err == nil {
+				for _, d := range devs {
+					if d.MaxOutputChannels > 0 {
+						paAudioDevices = append(paAudioDevices, d)
+					}
+				}
 			}
+		}
+		_ = err
+
+		if saved >= 0 {
+			syscall.Dup2(saved, syscall.Stderr)
+			syscall.Close(saved)
 		}
 	})
 	return paInitErr
@@ -67,6 +80,7 @@ type Player struct {
 	volume    float64
 
 	sampleRate int
+	playStart  time.Time
 
 	eqData      [numEqualizerBars]float64
 	stopCh      chan struct{}
@@ -175,6 +189,18 @@ func (p *Player) CurrentFile() string {
 		return ""
 	}
 	return p.files[p.currentIdx]
+}
+
+func (p *Player) Files() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.files
+}
+
+func (p *Player) CurrentIndex() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.currentIdx
 }
 
 func (p *Player) SetFiles(files []string, shuffle bool) {
@@ -322,15 +348,6 @@ func (p *Player) playCurrent() {
 		return
 	}
 
-	if len(paAudioDevices) == 0 {
-		audioFile.Close()
-		p.mu.Lock()
-		p.errorMsg = audioDiagnostic()
-		p.mu.Unlock()
-		p.sendState(StateStopped)
-		return
-	}
-
 	const paFrames = 2048
 	paBuf := make([]int16, paFrames*2)
 
@@ -341,12 +358,17 @@ func (p *Player) playCurrent() {
 		params.SampleRate = float64(sampleRate)
 		params.FramesPerBuffer = paFrames
 		stream, err = portaudio.OpenStream(params, &paBuf)
-	} else {
+	}
+	if stream == nil {
 		stream, err = portaudio.OpenDefaultStream(0, 2, float64(sampleRate), paFrames, &paBuf)
 	}
 	if err != nil {
 		p.mu.Lock()
-		p.errorMsg = "portaudio: " + err.Error()
+		if len(paAudioDevices) == 0 {
+			p.errorMsg = audioDiagnostic()
+		} else {
+			p.errorMsg = "portaudio: " + err.Error()
+		}
 		p.mu.Unlock()
 		audioFile.Close()
 		p.sendState(StateStopped)
@@ -368,6 +390,7 @@ func (p *Player) playCurrent() {
 	p.paStream = stream
 	p.paBuffer = paBuf
 	p.sampleRate = sampleRate
+	p.playStart = time.Now()
 	p.state = StatePlaying
 	p.errorMsg = ""
 	p.mu.Unlock()
@@ -411,16 +434,6 @@ func (p *Player) playCurrent() {
 	}
 
 	p.Next()
-
-	p.mu.Lock()
-	if (!p.shuffle && p.currentIdx+1 >= len(p.files)) ||
-		(p.shuffle && len(p.done) >= len(p.files)) {
-		p.state = StateStopped
-		p.mu.Unlock()
-		p.sendState(StateStopped)
-		return
-	}
-	p.mu.Unlock()
 }
 
 func (p *Player) pumpAudio() error {
@@ -437,26 +450,9 @@ func (p *Player) pumpAudio() error {
 	var acc []int16
 	var samples []float64
 	lastVol := p.volume
+	totalFrames := 0
 
 	flushEQ := func() {
-		if len(samples) < fftSize {
-			return
-		}
-		trimmed := samples
-		if len(trimmed) > fftSize {
-			trimmed = trimmed[len(trimmed)-fftSize:]
-		}
-		bars := computeEqualizerBars(trimmed, sampleRate)
-
-		p.mu.Lock()
-		p.eqData = bars
-		p.mu.Unlock()
-
-		select {
-		case p.eqChan <- bars:
-		default:
-		}
-
 		samples = make([]float64, 0, fftSize*2)
 	}
 
@@ -503,8 +499,9 @@ func (p *Player) pumpAudio() error {
 					}
 				}
 				acc = acc[len(paBuf):]
+				totalFrames += len(paBuf) / 2
 
-				if writeErr := stream.Write(); writeErr != nil {
+				if writeErr := stream.Write(); writeErr != nil && writeErr != portaudio.OutputUnderflowed {
 					return writeErr
 				}
 			}
@@ -519,6 +516,7 @@ func (p *Player) pumpAudio() error {
 		}
 	}
 
+	framesTotal := totalFrames
 	if len(acc) > 0 {
 		copy(paBuf, acc)
 		for i := len(acc); i < len(paBuf); i++ {
@@ -535,11 +533,19 @@ func (p *Player) pumpAudio() error {
 				paBuf[i] = int16(v)
 			}
 		}
+		framesTotal += len(acc) / 2
 		stream.Write()
 	}
 
 	flushEQ()
-	time.Sleep(100 * time.Millisecond)
+
+	if framesTotal > 0 {
+		elapsed := time.Since(p.playStart)
+		totalDur := time.Duration(framesTotal) * time.Second / time.Duration(sampleRate)
+		if remain := totalDur - elapsed; remain > 0 {
+			time.Sleep(remain)
+		}
+	}
 	return nil
 }
 
@@ -554,9 +560,49 @@ func (p *Player) PlayCurrent() {
 	}
 }
 
-func (p *Player) Next() {
+func (p *Player) Previous() {
+	p.mu.Lock()
 	if p.shuffle {
-		p.mu.Lock()
+		if len(p.done) == 0 {
+			p.mu.Unlock()
+			return
+		}
+		idx := p.rng.Intn(len(p.files))
+		for {
+			used := false
+			for _, d := range p.done {
+				if d == idx {
+					used = true
+					break
+				}
+			}
+			if !used {
+				p.currentIdx = idx
+				p.done = append(p.done, idx)
+				break
+			}
+			idx = p.rng.Intn(len(p.files))
+		}
+	} else {
+		if p.currentIdx-1 < 0 {
+			p.mu.Unlock()
+			return
+		}
+		p.currentIdx--
+	}
+	p.nextRequested = true
+	p.closeDecoderLocked()
+	p.mu.Unlock()
+
+	select {
+	case p.playNext <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Player) Next() {
+	p.mu.Lock()
+	if p.shuffle {
 		if len(p.done) >= len(p.files) {
 			p.mu.Unlock()
 			return
@@ -576,16 +622,16 @@ func (p *Player) Next() {
 				break
 			}
 		}
-		p.mu.Unlock()
 	} else {
-		p.mu.Lock()
 		if p.currentIdx+1 >= len(p.files) {
 			p.mu.Unlock()
 			return
 		}
 		p.currentIdx++
-		p.mu.Unlock()
 	}
+	p.nextRequested = true
+	p.closeDecoderLocked()
+	p.mu.Unlock()
 
 	select {
 	case p.playNext <- struct{}{}:

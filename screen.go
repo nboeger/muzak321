@@ -9,10 +9,10 @@ import (
 )
 
 type Screen struct {
-	win   *goncurses.Window
-	rows  int
-	cols  int
-	eqPos int
+	win            *goncurses.Window
+	rows           int
+	cols           int
+	playlistScroll int
 }
 
 func NewScreen() (*Screen, error) {
@@ -50,7 +50,6 @@ func NewScreen() (*Screen, error) {
 
 func (s *Screen) updateSize() {
 	s.rows, s.cols = s.win.MaxYX()
-	s.eqPos = 3
 }
 
 func (s *Screen) Close() {
@@ -104,63 +103,55 @@ func (s *Screen) clearLine(y int) {
 	s.win.MovePrint(y, 0, strings.Repeat(" ", s.cols-1))
 }
 
-func (s *Screen) EQData(data [numEqualizerBars]float64) {
+func (s *Screen) Playlist(files []string, currentIdx int) {
 	s.updateSize()
-	eqHeight := s.rows - s.eqPos - 3
-	if eqHeight < 4 {
+	listStart := 3
+	listEnd := s.rows - 2
+	avail := listEnd - listStart
+	if avail < 1 {
 		return
 	}
 
-	barWidth := (s.cols - 2) / numEqualizerBars
-	if barWidth < 1 {
-		barWidth = 1
-	}
-
-	for i := 0; i < numEqualizerBars; i++ {
-		barHeight := int(float64(eqHeight-1) * data[i])
-		if barHeight < 0 {
-			barHeight = 0
+	if len(files) == 0 {
+		for r := listStart; r < listEnd; r++ {
+			s.clearLine(r)
 		}
-		if barHeight > eqHeight-1 {
-			barHeight = eqHeight - 1
-		}
-
-		x := 1 + i*barWidth
-		if x >= s.cols-1 {
-			break
-		}
-
-		for b := 0; b < barWidth && x+b < s.cols-1; b++ {
-			s.win.MovePrint(s.eqPos+eqHeight-1, x+b, " ")
-		}
-
-		colorPair := s.eqColor(i)
-		s.win.AttrOn(goncurses.A_REVERSE)
-		s.win.ColorOn(colorPair)
-
-		topY := s.eqPos + eqHeight - 1 - barHeight
-		for b := 0; b < barWidth && x+b < s.cols-1; b++ {
-			for h := 0; h < barHeight; h++ {
-				s.win.MovePrint(topY+h, x+b, " ")
-			}
-		}
-
+		s.win.ColorOn(12)
+		s.win.MovePrint(listStart, 2, "(empty playlist)")
 		s.win.ColorOn(1)
-		s.win.AttrOff(goncurses.A_REVERSE)
+		return
 	}
-}
 
-func (s *Screen) eqColor(bar int) int16 {
-	switch {
-	case bar < 4:
-		return 10
-	case bar < 8:
-		return 11
-	case bar < 12:
-		return 12
-	default:
-		return 14
+	if currentIdx < s.playlistScroll {
+		s.playlistScroll = currentIdx
 	}
+	if currentIdx >= s.playlistScroll+avail {
+		s.playlistScroll = currentIdx - avail + 1
+	}
+
+	for r := listStart; r < listEnd; r++ {
+		s.clearLine(r)
+	}
+
+	end := s.playlistScroll + avail
+	if end > len(files) {
+		end = len(files)
+	}
+	for i := s.playlistScroll; i < end; i++ {
+		row := listStart + (i - s.playlistScroll)
+		name := cleanFileName(files[i])
+		if len(name) > s.cols-6 {
+			name = "..." + name[len(name)-s.cols+9:]
+		}
+		if i == currentIdx {
+			s.win.ColorOn(14)
+			s.win.MovePrint(row, 2, "> "+name)
+		} else {
+			s.win.ColorOn(1)
+			s.win.MovePrint(row, 2, "  "+name)
+		}
+	}
+	s.win.ColorOn(1)
 }
 
 func (s *Screen) StatusBar(state PlayerState, fileName string, errMsg ...string) {
@@ -195,7 +186,7 @@ func (s *Screen) StatusBar(state PlayerState, fileName string, errMsg ...string)
 	}
 
 	statusStr := fmt.Sprintf(" [%s]  ", status)
-	controls := "[Space] Play/Pause  [M] Mute  [N] Next  [Up/Dn] Vol  [Q] Quit"
+	controls := "[Space] Play/Pause  [M] Mute  [P/N] Prev/Next  [Up/Dn] Vol  [Q] Quit"
 
 
 	s.win.ColorOn(1)
@@ -276,7 +267,7 @@ func (s *Screen) ShowHelp() {
 		" Controls:",
 		"   Space    Play / Pause",
 		"   M        Mute / Unmute",
-		"   N        Next track",
+		"   P/N      Prev / Next track",
 		"   Up/Down  Volume",
 		"   D        Audio device",
 		"   Q        Quit",
