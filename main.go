@@ -133,16 +133,21 @@ func main() {
 	}()
 
 	if *fileArg != "" {
-		files, err := resolvePath(*fileArg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		allArgs := append([]string{*fileArg}, flag.Args()...)
+		var allFiles []string
+		for _, arg := range allArgs {
+			files, err := resolvePath(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			allFiles = append(allFiles, files...)
 		}
-		if len(files) == 0 {
+		if len(allFiles) == 0 {
 			fmt.Fprintln(os.Stderr, "No files to play")
 			os.Exit(1)
 		}
-		player.SetFiles(files, *shuffle)
+		player.SetFiles(allFiles, *shuffle)
 		player.Start()
 		player.PlayCurrent()
 	} else {
