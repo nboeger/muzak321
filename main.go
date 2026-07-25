@@ -181,11 +181,16 @@ func (a *App) runBrowser() {
 	}
 }
 
+func (a *App) renderPlayer() {
+	a.screen.Title(cleanFileName(a.player.CurrentFile()))
+	a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+	a.screen.EQData([numEqualizerBars]float64{})
+	a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
+}
+
 func (a *App) runPlayer() {
 	a.screen.Clear()
-	a.screen.Title(cleanFileName(a.player.CurrentFile()))
-	a.screen.EQData([numEqualizerBars]float64{})
-	a.screen.StatusBar(StatePlaying, a.player.CurrentFile())
+	a.renderPlayer()
 	a.screen.Refresh()
 
 	eqTicker := time.NewTicker(50 * time.Millisecond)
@@ -195,19 +200,31 @@ func (a *App) runPlayer() {
 		select {
 		case file := <-a.player.fileChanged:
 			a.screen.Title(cleanFileName(file))
+			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
 			a.screen.EQData([numEqualizerBars]float64{})
 			a.screen.StatusBar(a.player.State(), file)
 			a.screen.Refresh()
 
 		case state := <-a.player.stateChan:
 			_ = state
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile(), a.player.Error())
+			errMsg := a.player.Error()
+			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.StatusBar(state, a.player.CurrentFile(), errMsg)
 			a.screen.Refresh()
-			if state == StateStopped && a.inBrowser {
-				if a.player.Error() != "" {
-					a.screen.GetKey()
+			if state == StateStopped {
+				if errMsg != "" {
+					a.screen.StatusBar(state, a.player.CurrentFile(), errMsg+" - press any key")
+				} else {
+					a.screen.StatusBar(state, a.player.CurrentFile(), "Done - press any key")
 				}
-				time.Sleep(500 * time.Millisecond)
+				a.screen.Refresh()
+				if a.inBrowser {
+					a.screen.GetKey()
+					time.Sleep(500 * time.Millisecond)
+					return
+				}
+				a.screen.GetKey()
+				a.running = false
 				return
 			}
 
@@ -217,6 +234,7 @@ func (a *App) runPlayer() {
 			a.screen.Refresh()
 
 		case <-eqTicker.C:
+			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
@@ -255,6 +273,37 @@ func (a *App) runPlayer() {
 
 		case key == 'n' || key == 'N':
 			a.player.Next()
+
+		case key == 'd' || key == 'D':
+			if a.player.DeviceCount() == 0 {
+				break
+			}
+			names := DevicesList()
+			sel := a.screen.ShowDevices(names, a.player.DeviceIndex())
+			a.player.SetDevice(sel)
+			a.screen.Clear()
+			a.renderPlayer()
+			a.screen.Refresh()
+			st := a.player.State()
+			if st == StatePlaying || st == StatePaused {
+				a.player.Stop()
+				a.player.Start()
+				a.player.PlayCurrent()
+			}
+
+		case key == goncurses.KEY_UP:
+			v := a.player.Volume()
+			a.player.SetVolume(v + 0.1)
+			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
+			a.screen.Refresh()
+
+		case key == goncurses.KEY_DOWN:
+			v := a.player.Volume()
+			a.player.SetVolume(v - 0.1)
+			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
+			a.screen.Refresh()
 
 		case key == 'h' || key == 'H':
 			a.screen.ShowHelp()

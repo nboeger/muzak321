@@ -50,7 +50,7 @@ func NewScreen() (*Screen, error) {
 
 func (s *Screen) updateSize() {
 	s.rows, s.cols = s.win.MaxYX()
-	s.eqPos = 2
+	s.eqPos = 3
 }
 
 func (s *Screen) Close() {
@@ -66,7 +66,14 @@ func (s *Screen) Refresh() {
 }
 
 func (s *Screen) GetKey() goncurses.Key {
-	return s.win.GetChar()
+	// Loop because getch() can return ERR (-1) when interrupted
+	// by Go runtime signals (SIGURG, etc.)
+	for {
+		key := s.win.GetChar()
+		if key != -1 {
+			return key
+		}
+	}
 }
 
 func (s *Screen) Title(name string) {
@@ -77,6 +84,20 @@ func (s *Screen) Title(name string) {
 		display = "..." + display[len(display)-s.cols+5:]
 	}
 	s.win.MovePrint(0, (s.cols-len(display))/2, display)
+}
+
+func (s *Screen) DeviceInfo(name string, vol ...float64) {
+	s.win.ColorOn(12)
+	s.clearLine(1)
+	disp := "Device: " + name
+	if len(vol) > 0 {
+		disp += fmt.Sprintf("  Vol:%.0f%%", vol[0]*100)
+	}
+	if len(disp) > s.cols-4 {
+		disp = disp[:s.cols-4]
+	}
+	s.win.MovePrint(1, s.cols-len(disp)-1, disp)
+	s.win.ColorOn(1)
 }
 
 func (s *Screen) clearLine(y int) {
@@ -174,7 +195,8 @@ func (s *Screen) StatusBar(state PlayerState, fileName string, errMsg ...string)
 	}
 
 	statusStr := fmt.Sprintf(" [%s]  ", status)
-	controls := "[Space] Play/Pause  [M] Mute/Unmute  [N] Next  [Q] Quit"
+	controls := "[Space] Play/Pause  [M] Mute  [N] Next  [Up/Dn] Vol  [Q] Quit"
+
 
 	s.win.ColorOn(1)
 	s.win.MovePrint(bottom, 1, statusStr)
@@ -255,6 +277,8 @@ func (s *Screen) ShowHelp() {
 		"   Space    Play / Pause",
 		"   M        Mute / Unmute",
 		"   N        Next track",
+		"   Up/Down  Volume",
+		"   D        Audio device",
 		"   Q        Quit",
 		"",
 		" Press any key to continue...",
@@ -267,6 +291,45 @@ func (s *Screen) ShowHelp() {
 	}
 	s.win.Refresh()
 	s.win.GetChar()
+}
+
+func (s *Screen) ShowDevices(devices []string, selected int) int {
+	s.win.Clear()
+	s.win.ColorOn(1)
+
+	lines := []string{
+		" Audio Output Devices",
+		"",
+	}
+	for i, d := range devices {
+		mark := "  "
+		if i == selected {
+			mark = " >"
+		}
+		line := fmt.Sprintf("%s[%d] %s", mark, i, d)
+		lines = append(lines, line)
+	}
+	lines = append(lines, "", " Press number to select, any other key to cancel")
+
+	for i, l := range lines {
+		if i < s.rows {
+			s.win.MovePrint(i, 2, l)
+		}
+	}
+	s.win.Refresh()
+
+	for {
+		key := s.win.GetChar()
+		if key >= '0' && key <= '9' {
+			n := int(key - '0')
+			if n >= 0 && n < len(devices) {
+				return n
+			}
+		}
+		if key >= 0 && key <= 127 {
+			return selected
+		}
+	}
 }
 
 func (s *Screen) Message(msg string) {

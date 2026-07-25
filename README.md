@@ -28,15 +28,35 @@ Controls:
   Space    Play / Pause
   M        Mute / Unmute
   N        Next track
+  Up/Down  Volume
+  D        Audio device
   Q        Quit
 ```
 
 ## Audio requirements
 
-Your user must have access to the audio device. On Linux, add yourself to the `audio` group:
+PortAudio on Linux uses ALSA. For audio to work, one of these is needed:
+
+**Option A — ALSA with PulseAudio/PipeWire (recommended)**
+
+Install an audio server that provides an ALSA compatibility layer:
+
+```bash
+# For PulseAudio
+sudo apt-get install pulseaudio libasound2-plugins alsa-utils
+
+# For PipeWire
+sudo apt-get install pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils
+```
+
+This routes ALSA through a per-user audio server, so no special group is needed.
+
+**Option B — Direct ALSA access**
+
+Add yourself to the `audio` group and log out/in:
 
 ```bash
 sudo usermod -a -G audio $USER
 ```
 
-Then log out and back in for the change to take effect.
+If playback fails, the app shows a diagnostic message indicating the likely cause (permissions, missing hardware, etc.). Press 'D' to list and select audio devices.

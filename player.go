@@ -18,10 +18,23 @@ const (
 
 var paInitOnce sync.Once
 var paInitErr error
+var paAudioDevices []*portaudio.DeviceInfo
 
 func initPortAudio() error {
 	paInitOnce.Do(func() {
 		paInitErr = portaudio.Initialize()
+		if paInitErr != nil {
+			return
+		}
+		devs, err := portaudio.Devices()
+		if err != nil {
+			return
+		}
+		for _, d := range devs {
+			if d.MaxOutputChannels > 0 {
+				paAudioDevices = append(paAudioDevices, d)
+			}
+		}
 	})
 	return paInitErr
 }
@@ -50,6 +63,8 @@ type Player struct {
 	audioFile *os.File
 	paStream  *portaudio.Stream
 	paBuffer  []int16
+	deviceIdx int
+	volume    float64
 
 	sampleRate int
 
@@ -67,6 +82,7 @@ type Player struct {
 func NewPlayer() *Player {
 	return &Player{
 		state:       StateStopped,
+		volume:      0.8,
 		stopCh:      make(chan struct{}),
 		eqChan:      make(chan [numEqualizerBars]float64, 4),
 		fileChanged: make(chan string, 4),
@@ -90,6 +106,60 @@ func (p *Player) Error() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.errorMsg
+}
+
+func (p *Player) DeviceName() string {
+	p.mu.RLock()
+	idx := p.deviceIdx
+	p.mu.RUnlock()
+	if idx < 0 || idx >= len(paAudioDevices) {
+		return "default"
+	}
+	return paAudioDevices[idx].Name
+}
+
+func (p *Player) DeviceCount() int {
+	return len(paAudioDevices)
+}
+
+func (p *Player) DeviceIndex() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.deviceIdx
+}
+
+func (p *Player) Volume() float64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.volume
+}
+
+func (p *Player) SetVolume(v float64) {
+	if v < 0 {
+		v = 0
+	}
+	if v > 2.0 {
+		v = 2.0
+	}
+	p.mu.Lock()
+	p.volume = v
+	p.mu.Unlock()
+}
+
+func (p *Player) SetDevice(idx int) {
+	if idx >= 0 && idx < len(paAudioDevices) {
+		p.mu.Lock()
+		p.deviceIdx = idx
+		p.mu.Unlock()
+	}
+}
+
+func DevicesList() []string {
+	names := make([]string, len(paAudioDevices))
+	for i, d := range paAudioDevices {
+		names[i] = d.Name
+	}
+	return names
 }
 
 func (p *Player) EQData() [numEqualizerBars]float64 {
@@ -121,6 +191,9 @@ func (p *Player) SetFiles(files []string, shuffle bool) {
 }
 
 func (p *Player) Start() {
+	p.mu.Lock()
+	p.stopCh = make(chan struct{})
+	p.mu.Unlock()
 	go p.playbackLoop()
 }
 
@@ -188,6 +261,24 @@ func (p *Player) closeDecoderLocked() {
 	p.state = StateStopped
 }
 
+func audioDiagnostic() string {
+	// Check /dev/snd access (common on ALSA-only systems)
+	f, err := os.Open("/dev/snd/controlC0")
+	if err == nil {
+		f.Close()
+		return "audio hardware detected but no output devices available"
+	}
+	if os.IsPermission(err) {
+		return "no permission for audio device (try: sudo usermod -a -G audio $USER, then log out/in)"
+	}
+	// If controlC0 doesn't exist, try common ALSA card paths
+	dirs, _ := os.ReadDir("/dev/snd")
+	if len(dirs) == 0 {
+		return "no audio hardware found (/dev/snd is empty)"
+	}
+	return "audio device unavailable: " + err.Error()
+}
+
 func (p *Player) playCurrent() {
 	p.mu.Lock()
 	if len(p.files) == 0 {
@@ -231,9 +322,28 @@ func (p *Player) playCurrent() {
 		return
 	}
 
+	if len(paAudioDevices) == 0 {
+		audioFile.Close()
+		p.mu.Lock()
+		p.errorMsg = audioDiagnostic()
+		p.mu.Unlock()
+		p.sendState(StateStopped)
+		return
+	}
+
 	const paFrames = 2048
 	paBuf := make([]int16, paFrames*2)
-	stream, err := portaudio.OpenDefaultStream(0, 2, float64(sampleRate), paFrames, &paBuf)
+
+	var stream *portaudio.Stream
+	if p.deviceIdx >= 0 && p.deviceIdx < len(paAudioDevices) {
+		params := portaudio.LowLatencyParameters(nil, paAudioDevices[p.deviceIdx])
+		params.Output.Channels = 2
+		params.SampleRate = float64(sampleRate)
+		params.FramesPerBuffer = paFrames
+		stream, err = portaudio.OpenStream(params, &paBuf)
+	} else {
+		stream, err = portaudio.OpenDefaultStream(0, 2, float64(sampleRate), paFrames, &paBuf)
+	}
 	if err != nil {
 		p.mu.Lock()
 		p.errorMsg = "portaudio: " + err.Error()
@@ -326,6 +436,7 @@ func (p *Player) pumpAudio() error {
 	decoderBuf := make([]byte, 8192)
 	var acc []int16
 	var samples []float64
+	lastVol := p.volume
 
 	flushEQ := func() {
 		if len(samples) < fftSize {
@@ -362,6 +473,8 @@ func (p *Player) pumpAudio() error {
 			continue
 		}
 
+		lastVol = p.volume
+
 		n, err := decoder.Read(decoderBuf)
 		if n > 0 {
 			for i := 0; i < n/2; i++ {
@@ -377,6 +490,17 @@ func (p *Player) pumpAudio() error {
 					}
 				} else {
 					copy(paBuf, acc[:len(paBuf)])
+					if lastVol != 1.0 {
+						for i := range paBuf {
+							v := float64(paBuf[i]) * lastVol
+							if v > 32767 {
+								v = 32767
+							} else if v < -32768 {
+								v = -32768
+							}
+							paBuf[i] = int16(v)
+						}
+					}
 				}
 				acc = acc[len(paBuf):]
 
@@ -400,6 +524,17 @@ func (p *Player) pumpAudio() error {
 		for i := len(acc); i < len(paBuf); i++ {
 			paBuf[i] = 0
 		}
+		if lastVol != 1.0 {
+			for i := range paBuf {
+				v := float64(paBuf[i]) * lastVol
+				if v > 32767 {
+					v = 32767
+				} else if v < -32768 {
+					v = -32768
+				}
+				paBuf[i] = int16(v)
+			}
+		}
 		stream.Write()
 	}
 
@@ -412,6 +547,7 @@ func (p *Player) updateEQ() {
 }
 
 func (p *Player) PlayCurrent() {
+	p.setState(StatePlaying)
 	select {
 	case p.playNext <- struct{}{}:
 	default:
