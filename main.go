@@ -16,14 +16,6 @@ import (
 
 var resizePending int32
 
-func suppressStderr() {
-	null, _ := syscall.Open("/dev/null", syscall.O_WRONLY, 0)
-	if null >= 0 {
-		syscall.Dup2(null, syscall.Stderr)
-		syscall.Close(null)
-	}
-}
-
 type App struct {
 	screen    *Screen
 	player    *Player
@@ -158,7 +150,6 @@ func main() {
 			os.Exit(1)
 		}
 		defer screen.Close()
-		suppressStderr()
 
 		browser := NewBrowser()
 		app := &App{
@@ -186,7 +177,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer screen.Close()
-	suppressStderr()
 
 	app := &App{
 		screen:  screen,
@@ -214,7 +204,6 @@ func printHelp() {
 	fmt.Println("  M        Mute / Unmute")
 	fmt.Println("  P/N      Prev / Next track")
 	fmt.Println("  Up/Down  Volume")
-	fmt.Println("  D        Audio device")
 	fmt.Println("  Q        Quit")
 }
 
@@ -370,23 +359,6 @@ func (a *App) runPlayer() {
 
 		case key == 'n' || key == 'N':
 			a.player.Next()
-
-		case key == 'd' || key == 'D':
-			if a.player.DeviceCount() == 0 {
-				break
-			}
-			names := DevicesList()
-			sel := a.screen.ShowDevices(names, a.player.DeviceIndex())
-			a.player.SetDevice(sel)
-			a.screen.Clear()
-			a.renderPlayer()
-			a.screen.Refresh()
-			st := a.player.State()
-			if st == StatePlaying || st == StatePaused {
-				a.player.Stop()
-				a.player.Start()
-				a.player.PlayCurrent()
-			}
 
 		case key == goncurses.KEY_UP:
 			v := a.player.Volume()

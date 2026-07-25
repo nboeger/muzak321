@@ -279,7 +279,6 @@ func (s *Screen) ShowHelp() {
 		"   M        Mute / Unmute",
 		"   P/N      Prev / Next track",
 		"   Up/Down  Volume",
-		"   D        Audio device",
 		"   Q        Quit",
 		"",
 		" Press any key to continue...",
