@@ -248,6 +248,9 @@ func (a *App) runBrowser() {
 				a.inBrowser = true
 			}
 
+		case goncurses.KEY_RESIZE:
+			a.screen.Resize()
+
 		case goncurses.KEY_BACKSPACE, 127, 8:
 			a.browser.Navigate("..")
 		}
@@ -377,6 +380,11 @@ func (a *App) runPlayer() {
 
 		case key == 'p' || key == 'P':
 			a.player.Previous()
+
+		case key == goncurses.KEY_RESIZE:
+			a.screen.Resize()
+			a.renderPlayer()
+			a.screen.Refresh()
 
 		case key == 'h' || key == 'H':
 			a.screen.ShowHelp()

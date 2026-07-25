@@ -56,6 +56,14 @@ func (s *Screen) Close() {
 	goncurses.End()
 }
 
+func (s *Screen) Resize() {
+	s.win.Clear()
+	s.updateSize()
+	goncurses.ResizeTerm(s.rows, s.cols)
+	s.updateSize()
+	s.win.Clear()
+}
+
 func (s *Screen) Clear() {
 	s.win.Clear()
 }
