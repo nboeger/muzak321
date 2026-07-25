@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
 
+	"github.com/damonqin/portaudio"
 	"github.com/hajimehoshi/go-mp3"
 )
 
@@ -16,6 +15,16 @@ const (
 	fftSize         = 1024
 	numEqualizerBars = 16
 )
+
+var paInitOnce sync.Once
+var paInitErr error
+
+func initPortAudio() error {
+	paInitOnce.Do(func() {
+		paInitErr = portaudio.Initialize()
+	})
+	return paInitErr
+}
 
 type PlayerState int
 
@@ -34,10 +43,13 @@ type Player struct {
 	shuffle    bool
 	done       []int
 
-	decoder     *mp3.Decoder
-	audioFile   *os.File
-	ffplayCmd   *exec.Cmd
-	ffplayStdin io.WriteCloser
+	nextRequested bool
+	errorMsg      string
+
+	decoder   *mp3.Decoder
+	audioFile *os.File
+	paStream  *portaudio.Stream
+	paBuffer  []int16
 
 	sampleRate int
 
@@ -72,6 +84,12 @@ func (p *Player) State() PlayerState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.state
+}
+
+func (p *Player) Error() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.errorMsg
 }
 
 func (p *Player) EQData() [numEqualizerBars]float64 {
@@ -122,6 +140,10 @@ func (p *Player) setState(s PlayerState) {
 	p.mu.Lock()
 	p.state = s
 	p.mu.Unlock()
+	p.sendState(s)
+}
+
+func (p *Player) sendState(s PlayerState) {
 	select {
 	case p.stateChan <- s:
 	default:
@@ -152,19 +174,17 @@ func (p *Player) closeDecoder() {
 }
 
 func (p *Player) closeDecoderLocked() {
-	if p.ffplayStdin != nil {
-		p.ffplayStdin.Close()
-	}
-	if p.ffplayCmd != nil && p.ffplayCmd.Process != nil {
-		p.ffplayCmd.Process.Kill()
+	if p.paStream != nil {
+		p.paStream.Stop()
+		p.paStream.Close()
 	}
 	if p.audioFile != nil {
 		p.audioFile.Close()
 	}
 	p.decoder = nil
 	p.audioFile = nil
-	p.ffplayCmd = nil
-	p.ffplayStdin = nil
+	p.paStream = nil
+	p.paBuffer = nil
 	p.state = StateStopped
 }
 
@@ -173,79 +193,73 @@ func (p *Player) playCurrent() {
 	if len(p.files) == 0 {
 		p.state = StateStopped
 		p.mu.Unlock()
+		p.sendState(StateStopped)
 		return
 	}
 
 	p.closeDecoderLocked()
-
 	file := p.files[p.currentIdx]
+	p.mu.Unlock()
 
 	audioFile, err := os.Open(file)
 	if err != nil {
-		p.state = StateStopped
+		p.mu.Lock()
+		p.errorMsg = err.Error()
 		p.mu.Unlock()
-		select {
-		case p.stateChan <- StateStopped:
-		default:
-		}
+		p.sendState(StateStopped)
 		return
 	}
 
 	decoder, err := mp3.NewDecoder(audioFile)
 	if err != nil {
 		audioFile.Close()
-		p.state = StateStopped
+		p.mu.Lock()
+		p.errorMsg = "invalid MP3 file"
 		p.mu.Unlock()
-		select {
-		case p.stateChan <- StateStopped:
-		default:
-		}
+		p.sendState(StateStopped)
 		return
 	}
 
 	sampleRate := decoder.SampleRate()
 
-	ffplay := exec.Command("ffplay",
-		"-nodisp",
-		"-autoexit",
-		"-loglevel", "quiet",
-		"-f", "s16le",
-		"-ar", fmt.Sprintf("%d", sampleRate),
-		"-ac", "2",
-		"-i", "pipe:0",
-	)
-
-	stdin, err := ffplay.StdinPipe()
-	if err != nil {
+	if err := initPortAudio(); err != nil {
 		audioFile.Close()
-		p.state = StateStopped
+		p.mu.Lock()
+		p.errorMsg = err.Error()
 		p.mu.Unlock()
-		select {
-		case p.stateChan <- StateStopped:
-		default:
-		}
+		p.sendState(StateStopped)
 		return
 	}
 
-	err = ffplay.Start()
+	const paFrames = 2048
+	paBuf := make([]int16, paFrames*2)
+	stream, err := portaudio.OpenDefaultStream(0, 2, float64(sampleRate), paFrames, &paBuf)
 	if err != nil {
-		stdin.Close()
-		audioFile.Close()
-		p.state = StateStopped
+		p.mu.Lock()
+		p.errorMsg = "portaudio: " + err.Error()
 		p.mu.Unlock()
-		select {
-		case p.stateChan <- StateStopped:
-		default:
-		}
+		audioFile.Close()
+		p.sendState(StateStopped)
+		return
+	}
+	if err := stream.Start(); err != nil {
+		stream.Close()
+		audioFile.Close()
+		p.mu.Lock()
+		p.errorMsg = "portaudio: " + err.Error()
+		p.mu.Unlock()
+		p.sendState(StateStopped)
 		return
 	}
 
+	p.mu.Lock()
 	p.audioFile = audioFile
 	p.decoder = decoder
-	p.ffplayCmd = ffplay
-	p.ffplayStdin = stdin
+	p.paStream = stream
+	p.paBuffer = paBuf
 	p.sampleRate = sampleRate
 	p.state = StatePlaying
+	p.errorMsg = ""
 	p.mu.Unlock()
 
 	select {
@@ -253,81 +267,145 @@ func (p *Player) playCurrent() {
 	default:
 	}
 
-	p.pumpAudio()
-}
+	err = p.pumpAudio()
 
-func (p *Player) pumpAudio() {
-	decoder := p.decoder
-	stdin := p.ffplayStdin
-	sampleRate := p.sampleRate
+	p.mu.Lock()
+	p.closeDecoderLocked()
+	advance := p.nextRequested
+	p.nextRequested = false
+	done := false
+	if !advance {
+		if (!p.shuffle && p.currentIdx+1 >= len(p.files)) ||
+			(p.shuffle && len(p.done) >= len(p.files)) {
+			done = true
+		}
+	}
+	p.mu.Unlock()
 
-	if decoder == nil || stdin == nil {
+	if err != nil && !advance {
+		p.mu.Lock()
+		p.errorMsg = "playback error: " + err.Error()
+		p.mu.Unlock()
+		p.sendState(StateStopped)
 		return
 	}
 
-	defer func() {
-		stdin.Close()
-	}()
+	if advance || done {
+		if done {
+			p.mu.Lock()
+			p.state = StateStopped
+			p.mu.Unlock()
+			p.sendState(StateStopped)
+		}
+		return
+	}
 
-	buf := make([]byte, 8192)
-	silenceBuf := make([]byte, 8192)
+	p.Next()
+
+	p.mu.Lock()
+	if (!p.shuffle && p.currentIdx+1 >= len(p.files)) ||
+		(p.shuffle && len(p.done) >= len(p.files)) {
+		p.state = StateStopped
+		p.mu.Unlock()
+		p.sendState(StateStopped)
+		return
+	}
+	p.mu.Unlock()
+}
+
+func (p *Player) pumpAudio() error {
+	decoder := p.decoder
+	stream := p.paStream
+	paBuf := p.paBuffer
+	sampleRate := p.sampleRate
+
+	if decoder == nil || stream == nil || paBuf == nil {
+		return nil
+	}
+
+	decoderBuf := make([]byte, 8192)
+	var acc []int16
 	var samples []float64
-	done := false
 
-	for !done {
+	flushEQ := func() {
+		if len(samples) < fftSize {
+			return
+		}
+		trimmed := samples
+		if len(trimmed) > fftSize {
+			trimmed = trimmed[len(trimmed)-fftSize:]
+		}
+		bars := computeEqualizerBars(trimmed, sampleRate)
+
+		p.mu.Lock()
+		p.eqData = bars
+		p.mu.Unlock()
+
+		select {
+		case p.eqChan <- bars:
+		default:
+		}
+
+		samples = make([]float64, 0, fftSize*2)
+	}
+
+	for {
 		p.mu.RLock()
 		state := p.state
 		p.mu.RUnlock()
 
 		switch state {
 		case StateStopped:
-			return
+			return nil
 		case StatePaused:
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 
-		n, err := decoder.Read(buf)
+		n, err := decoder.Read(decoderBuf)
 		if n > 0 {
-			chunk := buf[:n]
-			if state == StateMuted {
-				chunk = silenceBuf[:n]
+			for i := 0; i < n/2; i++ {
+				s := int16(uint16(decoderBuf[2*i]) | uint16(decoderBuf[2*i+1])<<8)
+				acc = append(acc, s)
+				samples = append(samples, float64(s)/32768.0)
 			}
 
-			if _, writeErr := stdin.Write(chunk); writeErr != nil {
-				return
-			}
-
-			samples = append(samples, convertToFloat64(buf[:n])...)
-			if len(samples) >= fftSize*2 {
-				trimmed := samples
-				if len(trimmed) > fftSize {
-					trimmed = trimmed[len(trimmed)-fftSize:]
+			for len(acc) >= len(paBuf) {
+				if state == StateMuted {
+					for i := range paBuf {
+						paBuf[i] = 0
+					}
+				} else {
+					copy(paBuf, acc[:len(paBuf)])
 				}
-				bars := computeEqualizerBars(trimmed, sampleRate)
+				acc = acc[len(paBuf):]
 
-				p.mu.Lock()
-				p.eqData = bars
-				p.mu.Unlock()
-
-				select {
-				case p.eqChan <- bars:
-				default:
+				if writeErr := stream.Write(); writeErr != nil {
+					return writeErr
 				}
-
-				samples = make([]float64, 0, fftSize*2)
 			}
+
+			flushEQ()
 		}
 
 		if err == io.EOF {
-			done = true
+			break
 		} else if err != nil {
-			return
+			return err
 		}
 	}
 
+	if len(acc) > 0 {
+		copy(paBuf, acc)
+		for i := len(acc); i < len(paBuf); i++ {
+			paBuf[i] = 0
+		}
+		stream.Write()
+	}
+
+	flushEQ()
 	time.Sleep(100 * time.Millisecond)
-	p.Next()
+	return nil
 }
 
 func (p *Player) updateEQ() {

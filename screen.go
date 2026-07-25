@@ -142,7 +142,7 @@ func (s *Screen) eqColor(bar int) int16 {
 	}
 }
 
-func (s *Screen) StatusBar(state PlayerState, fileName string) {
+func (s *Screen) StatusBar(state PlayerState, fileName string, errMsg ...string) {
 	bottom := s.rows - 1
 	s.clearLine(bottom)
 	s.win.ColorOn(1)
@@ -157,6 +157,20 @@ func (s *Screen) StatusBar(state PlayerState, fileName string) {
 		status = "MUTED"
 	case StateStopped:
 		status = "STOPPED"
+	}
+
+	if len(errMsg) > 0 && errMsg[0] != "" {
+		msg := errMsg[0]
+		if len(msg) > s.cols-4 {
+			msg = msg[:s.cols-4]
+		}
+		s.win.MovePrint(bottom, 1, msg)
+		s.win.ColorOn(13)
+		restart := fmt.Sprintf("  Press [Space] '%s' or [N] Next", fileName)
+		if 1+len(msg)+len(restart) < s.cols-1 {
+			s.win.MovePrint(bottom, 1+len(msg), restart)
+		}
+		return
 	}
 
 	statusStr := fmt.Sprintf(" [%s]  ", status)

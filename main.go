@@ -111,7 +111,6 @@ func main() {
 		running: true,
 	}
 
-	player.Start()
 	app.runPlayer()
 
 	signal.Stop(sigCh)
@@ -167,12 +166,13 @@ func (a *App) runBrowser() {
 				if len(files) == 0 {
 					continue
 				}
+				a.player = NewPlayer()
 				a.player.SetFiles(files, false)
 				a.player.Start()
 				a.inBrowser = false
 				a.player.PlayCurrent()
 				a.runPlayer()
-				return
+				a.inBrowser = true
 			}
 
 		case goncurses.KEY_BACKSPACE, 127, 8:
@@ -201,8 +201,15 @@ func (a *App) runPlayer() {
 
 		case state := <-a.player.stateChan:
 			_ = state
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
+			a.screen.StatusBar(a.player.State(), a.player.CurrentFile(), a.player.Error())
 			a.screen.Refresh()
+			if state == StateStopped && a.inBrowser {
+				if a.player.Error() != "" {
+					a.screen.GetKey()
+				}
+				time.Sleep(500 * time.Millisecond)
+				return
+			}
 
 		case data := <-a.player.eqChan:
 			a.screen.EQData(data)
