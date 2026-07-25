@@ -1,0 +1,271 @@
+package main
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/rthornton128/goncurses"
+)
+
+type Screen struct {
+	win   *goncurses.Window
+	rows  int
+	cols  int
+	eqPos int
+}
+
+func NewScreen() (*Screen, error) {
+	win, err := goncurses.Init()
+	if err != nil {
+		return nil, fmt.Errorf("ncurses init: %w", err)
+	}
+
+	goncurses.Raw(true)
+	goncurses.Echo(false)
+	goncurses.Cursor(0)
+	win.Keypad(true)
+	win.Timeout(50)
+
+	if goncurses.HasColors() {
+		goncurses.StartColor()
+		goncurses.InitPair(1, goncurses.C_WHITE, goncurses.C_BLUE)
+		goncurses.InitPair(2, goncurses.C_CYAN, goncurses.C_BLUE)
+		goncurses.InitPair(3, goncurses.C_WHITE, goncurses.C_BLUE)
+		goncurses.InitPair(10, goncurses.C_YELLOW, goncurses.C_BLUE)
+		goncurses.InitPair(11, goncurses.C_GREEN, goncurses.C_BLUE)
+		goncurses.InitPair(12, goncurses.C_CYAN, goncurses.C_BLUE)
+		goncurses.InitPair(13, goncurses.C_RED, goncurses.C_BLUE)
+		goncurses.InitPair(14, goncurses.C_MAGENTA, goncurses.C_BLUE)
+	}
+
+	win.SetBackground(goncurses.ColorPair(1))
+	win.Clear()
+	win.ColorOn(1)
+
+	s := &Screen{win: win}
+	s.updateSize()
+	return s, nil
+}
+
+func (s *Screen) updateSize() {
+	s.rows, s.cols = s.win.MaxYX()
+	s.eqPos = 2
+}
+
+func (s *Screen) Close() {
+	goncurses.End()
+}
+
+func (s *Screen) Clear() {
+	s.win.Clear()
+}
+
+func (s *Screen) Refresh() {
+	s.win.Refresh()
+}
+
+func (s *Screen) GetKey() goncurses.Key {
+	return s.win.GetChar()
+}
+
+func (s *Screen) Title(name string) {
+	s.win.ColorOn(1)
+	s.clearLine(0)
+	display := name
+	if len(display) > s.cols-2 {
+		display = "..." + display[len(display)-s.cols+5:]
+	}
+	s.win.MovePrint(0, (s.cols-len(display))/2, display)
+}
+
+func (s *Screen) clearLine(y int) {
+	s.win.MovePrint(y, 0, strings.Repeat(" ", s.cols-1))
+}
+
+func (s *Screen) EQData(data [numEqualizerBars]float64) {
+	s.updateSize()
+	eqHeight := s.rows - s.eqPos - 3
+	if eqHeight < 4 {
+		return
+	}
+
+	barWidth := (s.cols - 2) / numEqualizerBars
+	if barWidth < 1 {
+		barWidth = 1
+	}
+
+	for i := 0; i < numEqualizerBars; i++ {
+		barHeight := int(float64(eqHeight-1) * data[i])
+		if barHeight < 0 {
+			barHeight = 0
+		}
+		if barHeight > eqHeight-1 {
+			barHeight = eqHeight - 1
+		}
+
+		x := 1 + i*barWidth
+		if x >= s.cols-1 {
+			break
+		}
+
+		for b := 0; b < barWidth && x+b < s.cols-1; b++ {
+			s.win.MovePrint(s.eqPos+eqHeight-1, x+b, " ")
+		}
+
+		colorPair := s.eqColor(i)
+		s.win.AttrOn(goncurses.A_REVERSE)
+		s.win.ColorOn(colorPair)
+
+		topY := s.eqPos + eqHeight - 1 - barHeight
+		for b := 0; b < barWidth && x+b < s.cols-1; b++ {
+			for h := 0; h < barHeight; h++ {
+				s.win.MovePrint(topY+h, x+b, " ")
+			}
+		}
+
+		s.win.ColorOn(1)
+		s.win.AttrOff(goncurses.A_REVERSE)
+	}
+}
+
+func (s *Screen) eqColor(bar int) int16 {
+	switch {
+	case bar < 4:
+		return 10
+	case bar < 8:
+		return 11
+	case bar < 12:
+		return 12
+	default:
+		return 14
+	}
+}
+
+func (s *Screen) StatusBar(state PlayerState, fileName string) {
+	bottom := s.rows - 1
+	s.clearLine(bottom)
+	s.win.ColorOn(1)
+
+	var status string
+	switch state {
+	case StatePlaying:
+		status = "PLAYING"
+	case StatePaused:
+		status = "PAUSED"
+	case StateMuted:
+		status = "MUTED"
+	case StateStopped:
+		status = "STOPPED"
+	}
+
+	statusStr := fmt.Sprintf(" [%s]  ", status)
+	controls := "[Space] Play/Pause  [M] Mute/Unmute  [N] Next  [Q] Quit"
+
+	s.win.ColorOn(1)
+	s.win.MovePrint(bottom, 1, statusStr)
+	s.win.ColorOn(11)
+
+	controlsX := len(statusStr) + 2
+	if controlsX < s.cols-2 {
+		s.win.MovePrint(bottom, controlsX, controls)
+	}
+	s.win.ColorOn(1)
+}
+
+func (s *Screen) Browser(entries []DirEntry, cursor int, scrollOffset int, dir string) {
+	s.win.Clear()
+	s.win.ColorOn(1)
+
+	heading := fmt.Sprintf(" Select Files — %s", dir)
+	if len(heading) > s.cols-2 {
+		heading = "..." + heading[len(heading)-s.cols+5:]
+	}
+	s.win.MovePrint(0, (s.cols-len(heading))/2, heading)
+
+	helpLine := s.rows - 1
+	s.clearLine(helpLine)
+	s.win.MovePrint(helpLine, 1, "[Up/Down] Navigate  [Enter] Select  [Backspace] Up  [Q] Quit")
+
+	maxDisplay := s.rows - 3
+	if maxDisplay < 1 {
+		maxDisplay = 1
+	}
+
+	for i := 0; i < maxDisplay && i+scrollOffset < len(entries); i++ {
+		idx := i + scrollOffset
+		entry := entries[idx]
+		y := 2 + i
+
+		line := ""
+		if entry.IsDir {
+			line = "/" + entry.Name
+		} else {
+			line = " " + entry.Name
+		}
+
+		if idx == cursor {
+			s.win.ColorOn(11)
+			s.win.AttrOn(goncurses.A_REVERSE)
+			s.clearLine(y)
+			s.win.MovePrint(y, 2, line)
+			s.win.AttrOff(goncurses.A_REVERSE)
+			s.win.ColorOn(1)
+		} else {
+			s.clearLine(y)
+			if entry.IsDir {
+				s.win.ColorOn(12)
+			} else {
+				s.win.ColorOn(1)
+			}
+			s.win.MovePrint(y, 2, line)
+			s.win.ColorOn(1)
+		}
+	}
+}
+
+func (s *Screen) ShowHelp() {
+	s.win.Clear()
+	s.win.ColorOn(1)
+
+	lines := []string{
+		" muzak321 — MP3 Music Player",
+		"",
+		" Usage:",
+		"   muzak321 -f <playlist.m3u>   Play an M3U playlist",
+		"   muzak321 -s                   Shuffle playback",
+		"   muzak321 -h                   Show this help",
+		"   muzak321                      File browser mode",
+		"",
+		" Controls:",
+		"   Space    Play / Pause",
+		"   M        Mute / Unmute",
+		"   N        Next track",
+		"   Q        Quit",
+		"",
+		" Press any key to continue...",
+	}
+
+	for i, l := range lines {
+		if i < s.rows {
+			s.win.MovePrint(i, 2, l)
+		}
+	}
+	s.win.Refresh()
+	s.win.GetChar()
+}
+
+func (s *Screen) Message(msg string) {
+	s.updateSize()
+	mid := s.rows / 2
+	s.win.ColorOn(1)
+	s.clearLine(mid)
+	if len(msg) > s.cols-4 {
+		msg = msg[:s.cols-4]
+	}
+	s.win.MovePrint(mid, (s.cols-len(msg))/2, msg)
+}
+
+func cleanFileName(path string) string {
+	return filepath.Base(path)
+}
