@@ -61,7 +61,7 @@ type Player struct {
 
 	ctrl        *beep.Ctrl
 	volStr      *volStreamer
-	trackDone   chan struct{}
+	abort       chan struct{}
 	speakerInit bool
 
 	stopCh      chan struct{}
@@ -247,13 +247,13 @@ func (p *Player) playbackLoop() {
 }
 
 func (p *Player) closeDecoderLocked() {
-	if p.trackDone != nil {
+	if p.abort != nil {
 		select {
-		case <-p.trackDone:
+		case <-p.abort:
 		default:
-			close(p.trackDone)
+			close(p.abort)
 		}
-		p.trackDone = nil
+		p.abort = nil
 	}
 	p.ctrl = nil
 	p.volStr = nil
@@ -307,6 +307,7 @@ func (p *Player) playCurrent() {
 	volStr := &volStreamer{inner: streamer, volume: p.volume}
 	ctrl := &beep.Ctrl{Streamer: volStr}
 	trackDone := make(chan struct{})
+	abort := make(chan struct{})
 
 	speaker.Play(beep.Seq(ctrl, beep.Callback(func() {
 		close(trackDone)
@@ -315,7 +316,7 @@ func (p *Player) playCurrent() {
 	p.mu.Lock()
 	p.ctrl = ctrl
 	p.volStr = volStr
-	p.trackDone = trackDone
+	p.abort = abort
 	if p.muted {
 		p.volStr.mu.Lock()
 		p.volStr.volume = 0
@@ -332,11 +333,15 @@ func (p *Player) playCurrent() {
 
 	select {
 	case <-trackDone:
+	case <-abort:
 	case <-p.stopCh:
 	}
 
 	streamer.Close()
 	audioFile.Close()
+
+	// Wait for speaker to flush the streamer before starting the next track
+	time.Sleep(100 * time.Millisecond)
 
 	p.mu.Lock()
 	p.closeDecoderLocked()
