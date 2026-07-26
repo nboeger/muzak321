@@ -158,11 +158,12 @@ func (b *Browser) Enter() (bool, error) {
 
 	entry := b.entries[b.cursor]
 	if entry.IsDir {
-		err := b.readDir(entry.Path)
+		files, err := resolvePath(entry.Path)
 		if err != nil {
 			return false, err
 		}
-		return false, nil
+		b.selected = files
+		return true, nil
 	}
 
 	ext := strings.ToLower(filepath.Ext(entry.Path))

@@ -11,6 +11,13 @@ import (
 	"github.com/faiface/beep/speaker"
 )
 
+func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {
+	if sr == 0 {
+		return 0
+	}
+	return time.Second * time.Duration(samples) / time.Duration(sr)
+}
+
 type PlayerState int
 
 const (
@@ -63,6 +70,8 @@ type Player struct {
 	volStr      *volStreamer
 	abort       chan struct{}
 	speakerInit bool
+	streamer    beep.StreamSeekCloser
+	sampleRate  beep.SampleRate
 
 	stopCh      chan struct{}
 	fileChanged chan string
@@ -167,6 +176,17 @@ func (p *Player) DeviceCount() int    { return 0 }
 func (p *Player) DeviceIndex() int    { return 0 }
 func (p *Player) SetDevice(int)       {}
 
+func (p *Player) Progress() (pos, dur time.Duration) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.streamer != nil {
+		sr := p.sampleRate
+		pos = samplesToDuration(p.streamer.Position(), sr)
+		dur = samplesToDuration(p.streamer.Len(), sr)
+	}
+	return
+}
+
 func (p *Player) CurrentFile() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -199,6 +219,22 @@ func (p *Player) SetFiles(files []string, shuffle bool) {
 		p.done = nil
 	}
 	p.mu.Unlock()
+}
+
+func (p *Player) AppendFiles(files []string) {
+	p.mu.Lock()
+	wasStopped := p.state == StateStopped
+	p.files = append(p.files, files...)
+	if wasStopped && len(p.files) > 0 {
+		p.currentIdx = len(p.files) - len(files)
+	}
+	p.mu.Unlock()
+	if wasStopped {
+		select {
+		case p.playNext <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (p *Player) Start() {
@@ -257,6 +293,8 @@ func (p *Player) closeDecoderLocked() {
 	}
 	p.ctrl = nil
 	p.volStr = nil
+	p.streamer = nil
+	p.sampleRate = 0
 	p.state = StateStopped
 }
 
@@ -303,6 +341,11 @@ func (p *Player) playCurrent() {
 		}
 		p.speakerInit = true
 	}
+
+	p.mu.Lock()
+	p.streamer = streamer
+	p.sampleRate = format.SampleRate
+	p.mu.Unlock()
 
 	volStr := &volStreamer{inner: streamer, volume: p.volume}
 	ctrl := &beep.Ctrl{Streamer: volStr}

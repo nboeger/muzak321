@@ -7,14 +7,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/rthornton128/goncurses"
 )
-
-var resizePending int32
 
 type App struct {
 	screen    *Screen
@@ -114,14 +111,6 @@ func main() {
 			goncurses.End()
 		}
 		os.Exit(0)
-	}()
-
-	winchCh := make(chan os.Signal, 1)
-	signal.Notify(winchCh, syscall.SIGWINCH)
-	go func() {
-		for range winchCh {
-			atomic.StoreInt32(&resizePending, 1)
-		}
 	}()
 
 	if *fileArg != "" {
@@ -255,7 +244,7 @@ func (a *App) runBrowser() {
 			}
 
 		case goncurses.KEY_RESIZE:
-			a.screen.Resize()
+			a.screen.PollResize()
 
 		case goncurses.KEY_BACKSPACE, 127, 8:
 			a.browser.Navigate("..")
@@ -264,16 +253,64 @@ func (a *App) runBrowser() {
 }
 
 func (a *App) handleResize() {
-	if atomic.SwapInt32(&resizePending, 0) != 0 || a.screen.NeedResize() {
-		a.screen.Resize()
-	}
+	a.screen.PollResize()
 }
 
 func (a *App) renderPlayer() {
-	a.screen.Title(cleanFileName(a.player.CurrentFile()))
-	a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
-	a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
-	a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
+	p := a.player
+	pos, dur := p.Progress()
+	a.screen.Title(cleanFileName(p.CurrentFile()), p.State(), p.Volume())
+	a.screen.Progress(pos, dur)
+	a.screen.Playlist(p.Files(), p.CurrentIndex())
+	a.screen.StatusBar(p.State(), p.CurrentFile())
+}
+
+func (a *App) addToPlaylist() {
+	browser := NewBrowser()
+	if err := browser.Navigate("."); err != nil {
+		return
+	}
+
+	for {
+		a.handleResize()
+		entries := browser.Entries()
+		a.screen.Browser(entries, browser.Cursor(), browser.Scroll(), browser.Dir())
+		a.screen.Refresh()
+
+		key := a.screen.GetKey()
+		switch key {
+		case 'q', 'Q', 3, 26:
+			a.screen.Clear()
+			a.renderPlayer()
+			a.screen.Refresh()
+			return
+		case goncurses.KEY_UP:
+			browser.CursorUp()
+		case goncurses.KEY_DOWN:
+			browser.CursorDown()
+		case goncurses.KEY_ENTER, 13, 10:
+			done, err := browser.Enter()
+			if err != nil {
+				a.screen.Message(err.Error())
+				a.screen.GetKey()
+				continue
+			}
+			if done {
+				files := browser.SelectedFiles()
+				if len(files) > 0 {
+					a.player.AppendFiles(files)
+				}
+				a.screen.Clear()
+				a.renderPlayer()
+				a.screen.Refresh()
+				return
+			}
+		case goncurses.KEY_BACKSPACE, 127, 8:
+			browser.Navigate("..")
+		case goncurses.KEY_RESIZE:
+			a.screen.PollResize()
+		}
+	}
 }
 
 func (a *App) runPlayer() {
@@ -288,16 +325,19 @@ func (a *App) runPlayer() {
 		a.handleResize()
 		select {
 		case file := <-a.player.fileChanged:
-			a.screen.Title(cleanFileName(file))
-			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			pos, dur := a.player.Progress()
+			a.screen.Title(cleanFileName(file), a.player.State(), a.player.Volume())
+			a.screen.Progress(pos, dur)
 			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(a.player.State(), file)
 			a.screen.Refresh()
 
 		case state := <-a.player.stateChan:
 			_ = state
+			pos, dur := a.player.Progress()
 			errMsg := a.player.Error()
-			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), state, a.player.Volume())
+			a.screen.Progress(pos, dur)
 			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(state, a.player.CurrentFile(), errMsg)
 			a.screen.Refresh()
@@ -319,7 +359,9 @@ func (a *App) runPlayer() {
 			}
 
 		case <-eqTicker.C:
-			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			pos, dur := a.player.Progress()
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
+			a.screen.Progress(pos, dur)
 			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
@@ -344,6 +386,7 @@ func (a *App) runPlayer() {
 			default:
 				a.player.Play()
 			}
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
@@ -354,6 +397,7 @@ func (a *App) runPlayer() {
 			} else {
 				a.player.Mute()
 			}
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
@@ -363,22 +407,29 @@ func (a *App) runPlayer() {
 		case key == goncurses.KEY_UP:
 			v := a.player.Volume()
 			a.player.SetVolume(v + 0.1)
-			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			pos, dur := a.player.Progress()
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
+			a.screen.Progress(pos, dur)
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
 		case key == goncurses.KEY_DOWN:
 			v := a.player.Volume()
 			a.player.SetVolume(v - 0.1)
-			a.screen.DeviceInfo(a.player.DeviceName(), a.player.Volume())
+			pos, dur := a.player.Progress()
+			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
+			a.screen.Progress(pos, dur)
 			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
 			a.screen.Refresh()
 
 		case key == 'p' || key == 'P':
 			a.player.Previous()
 
+		case key == 'a' || key == 'A':
+			a.addToPlaylist()
+
 		case key == goncurses.KEY_RESIZE:
-			a.screen.Resize()
+			a.screen.PollResize()
 			a.renderPlayer()
 			a.screen.Refresh()
 

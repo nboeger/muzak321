@@ -1,6 +1,6 @@
 # muzak321
 
-A command-line MP3 music player with ncurses file browser and playlist display.
+A command-line MP3 music player with ncurses file browser, progress bar, and playlist display.
 
 ## Dependencies
 
@@ -34,14 +34,19 @@ muzak321                             File browser mode
 Controls:
   Space    Play / Pause
   M        Mute / Unmute
-  P/N      Prev / Next track
+  P / N    Prev / Next track
   Up/Down  Volume
-  D        Audio device
+  A        Add songs to the current playlist (opens file browser)
+  H        Help
   Q        Quit
 ```
 
-The player screen shows the song list with the current track highlighted.
-Volume defaults to 80%. Press **D** to list and select audio output devices.
+The player screen shows the current track, a live progress bar with elapsed/duration
+time, and the playlist with the current track highlighted. Volume defaults to 80%.
+
+Press **A** during playback to open the file browser and select more files or
+directories (walked recursively) to append to the playlist. If playback has ended,
+the new tracks start playing immediately.
 
 ## Audio requirements
 
