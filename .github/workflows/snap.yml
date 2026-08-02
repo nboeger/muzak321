@@ -27,7 +27,21 @@ jobs:
 
       - name: Build snap
         run: |
-          /snap/bin/snapcraft --destructive-mode
+          set +e
+          /snap/bin/snapcraft --destructive-mode --verbosity verbose 2>&1 | tee /tmp/snapcraft-build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            echo "=== snapcraft log tail ==="
+            tail -100 /tmp/snapcraft-build.log
+            exit "$rc"
+          fi
+
+      - name: Upload snapcraft log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapcraft-build-log
+          path: /tmp/snapcraft-build.log
 
       - name: Record snap file name
         id: snap-name
