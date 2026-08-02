@@ -57,6 +57,15 @@ jobs:
           name: muzak321-snap
           path: muzak321-snap
 
+      - name: Check store login secret is configured
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.STORE_LOGIN }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "::error::STORE_LOGIN secret is not set. Add it in GitHub → Settings → Secrets and variables → Actions (from 'snapcraft export-login')."
+            exit 1
+          fi
+
       - name: Publish snap to store (stable)
         uses: snapcore/action-publish@v1
         env:
