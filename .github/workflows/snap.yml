@@ -11,13 +11,18 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       snap-file: ${{ steps.snap-name.outputs.snap }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Print runner environment
+        run: |
+          cat /etc/os-release | grep -E 'VERSION_ID|VERSION_CODENAME'
+          ls /usr/lib/x86_64-linux-gnu/libapt-pkg.so.* 2>/dev/null
 
       - name: Install snapcraft and build dependencies
         run: |
