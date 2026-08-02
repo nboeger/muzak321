@@ -2,13 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/faiface/beep"
+	"github.com/faiface/beep/flac"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
+	"github.com/faiface/beep/vorbis"
+	"github.com/faiface/beep/wav"
 )
 
 func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {
@@ -16,6 +22,21 @@ func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {
 		return 0
 	}
 	return time.Second * time.Duration(samples) / time.Duration(sr)
+}
+
+func decodeAudio(file *os.File, path string) (beep.StreamSeekCloser, beep.Format, error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mp3":
+		return mp3.Decode(file)
+	case ".flac":
+		return flac.Decode(file)
+	case ".ogg":
+		return vorbis.Decode(file)
+	case ".wav":
+		return wav.Decode(file)
+	default:
+		return nil, beep.Format{}, fmt.Errorf("unsupported audio format: %s", filepath.Ext(path))
+	}
 }
 
 type PlayerState int
@@ -70,15 +91,22 @@ type Player struct {
 	volStr      *volStreamer
 	abort       chan struct{}
 	speakerInit bool
+	initRate    beep.SampleRate
 	streamer    beep.StreamSeekCloser
 	sampleRate  beep.SampleRate
+
+	curStream    *Stream
+	curMP3Stream *mp3Stream
 
 	stopCh      chan struct{}
 	fileChanged chan string
 	stateChan   chan PlayerState
 	playNext    chan struct{}
+	metaChan    chan struct{}
+	rng         seededRand
 
-	rng seededRand
+	initSpeak func(sr beep.SampleRate, bufferSize int) error
+	playSpeak func(s beep.Streamer)
 }
 
 func NewPlayer() *Player {
@@ -89,6 +117,9 @@ func NewPlayer() *Player {
 		fileChanged: make(chan string, 4),
 		stateChan:   make(chan PlayerState, 4),
 		playNext:    make(chan struct{}, 1),
+		metaChan:    make(chan struct{}, 1),
+		initSpeak:   speaker.Init,
+		playSpeak:   func(s beep.Streamer) { speaker.Play(s) },
 	}
 }
 
@@ -171,20 +202,41 @@ func (p *Player) SetVolume(v float64) {
 	p.mu.Unlock()
 }
 
-func (p *Player) DeviceName() string  { return "beep" }
-func (p *Player) DeviceCount() int    { return 0 }
-func (p *Player) DeviceIndex() int    { return 0 }
-func (p *Player) SetDevice(int)       {}
+func (p *Player) DeviceName() string { return "beep" }
+func (p *Player) DeviceCount() int   { return 0 }
+func (p *Player) DeviceIndex() int   { return 0 }
+func (p *Player) SetDevice(int)      {}
 
 func (p *Player) Progress() (pos, dur time.Duration) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.curMP3Stream != nil {
+		pos = samplesToDuration(int(p.curMP3Stream.PlayedSamples()), p.sampleRate)
+		dur = 0
+		return
+	}
 	if p.streamer != nil {
 		sr := p.sampleRate
 		pos = samplesToDuration(p.streamer.Position(), sr)
 		dur = samplesToDuration(p.streamer.Len(), sr)
 	}
 	return
+}
+
+// StreamTitle returns the live ICY StreamTitle, or "" when not on a stream.
+func (p *Player) StreamTitle() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.curStream == nil {
+		return ""
+	}
+	return p.curStream.Title()
+}
+
+func (p *Player) IsStreaming() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.curStream != nil
 }
 
 func (p *Player) CurrentFile() string {
@@ -271,6 +323,13 @@ func (p *Player) sendState(s PlayerState) {
 	}
 }
 
+func (p *Player) sendMeta() {
+	select {
+	case p.metaChan <- struct{}{}:
+	default:
+	}
+}
+
 func (p *Player) playbackLoop() {
 	for {
 		select {
@@ -291,6 +350,13 @@ func (p *Player) closeDecoderLocked() {
 		}
 		p.abort = nil
 	}
+	if p.curStream != nil {
+		p.curStream.Close()
+		p.curStream = nil
+	}
+	if p.curMP3Stream != nil {
+		p.curMP3Stream = nil
+	}
 	p.ctrl = nil
 	p.volStr = nil
 	p.streamer = nil
@@ -309,42 +375,85 @@ func (p *Player) playCurrent() {
 
 	p.closeDecoderLocked()
 	file := p.files[p.currentIdx]
+	// A "next" request only armed this track by advancing currentIdx (in
+	// Next/Previous/startNext); it carries no meaning into playback itself, so
+	// consume it now to avoid leaking it into this track's own advance logic.
+	p.nextRequested = false
 	p.mu.Unlock()
 
-	audioFile, err := os.Open(file)
-	if err != nil {
+	var streamer beep.Streamer
+	var decoderCloser io.Closer
+	var connCloser io.Closer
+	var sr beep.SampleRate
+	var liveStream *Stream
+	var curMS *mp3Stream
+	fail := func(msg string, extra ...func()) {
+		for _, f := range extra {
+			f()
+		}
 		p.mu.Lock()
-		p.errorMsg = err.Error()
+		p.errorMsg = msg
 		p.mu.Unlock()
 		p.sendState(StateStopped)
-		return
 	}
 
-	streamer, format, err := mp3.Decode(audioFile)
-	if err != nil {
-		audioFile.Close()
-		p.mu.Lock()
-		p.errorMsg = fmt.Sprintf("invalid MP3 file: %v", err)
-		p.mu.Unlock()
-		p.sendState(StateStopped)
-		return
+	if isStreamURL(file) {
+		st, err := openStream(file)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		ms, err := newMP3Stream(st)
+		if err != nil {
+			st.Close()
+			fail(err.Error())
+			return
+		}
+		streamer = ms
+		decoderCloser = ms
+		connCloser = st
+		liveStream = st
+		curMS = ms
+		sr = ms.SampleRate()
+	} else {
+		audioFile, err := os.Open(file)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		sc, format, err := decodeAudio(audioFile, file)
+		if err != nil {
+			audioFile.Close()
+			fail(err.Error())
+			return
+		}
+		streamer = sc
+		decoderCloser = sc
+		sr = format.SampleRate
 	}
 
-	if !p.speakerInit {
-		if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
-			streamer.Close()
-			p.mu.Lock()
-			p.errorMsg = fmt.Sprintf("speaker init: %v", err)
-			p.mu.Unlock()
-			p.sendState(StateStopped)
+	if !p.speakerInit || p.initRate != sr {
+		if err := p.initSpeak(sr, sr.N(time.Second/10)); err != nil {
+			if connCloser != nil {
+				connCloser.Close()
+			}
+			decoderCloser.Close()
+			fail(fmt.Sprintf("speaker init: %v", err))
 			return
 		}
 		p.speakerInit = true
+		p.initRate = sr
 	}
 
 	p.mu.Lock()
-	p.streamer = streamer
-	p.sampleRate = format.SampleRate
+	if sc, ok := streamer.(beep.StreamSeekCloser); ok {
+		p.streamer = sc
+	} else {
+		p.streamer = nil
+	}
+	p.curStream = liveStream
+	p.curMP3Stream = curMS
+	p.sampleRate = sr
 	p.mu.Unlock()
 
 	volStr := &volStreamer{inner: streamer, volume: p.volume}
@@ -352,7 +461,7 @@ func (p *Player) playCurrent() {
 	trackDone := make(chan struct{})
 	abort := make(chan struct{})
 
-	speaker.Play(beep.Seq(ctrl, beep.Callback(func() {
+	p.playSpeak(beep.Seq(ctrl, beep.Callback(func() {
 		close(trackDone)
 	})))
 
@@ -369,6 +478,21 @@ func (p *Player) playCurrent() {
 	p.errorMsg = ""
 	p.mu.Unlock()
 
+	if liveStream != nil {
+		go func() {
+			for {
+				select {
+				case <-liveStream.TitleChanged():
+					p.sendMeta()
+				case <-abort:
+					return
+				case <-p.stopCh:
+					return
+				}
+			}
+		}()
+	}
+
 	select {
 	case p.fileChanged <- file:
 	default:
@@ -380,8 +504,10 @@ func (p *Player) playCurrent() {
 	case <-p.stopCh:
 	}
 
-	streamer.Close()
-	audioFile.Close()
+	if connCloser != nil {
+		connCloser.Close()
+	}
+	decoderCloser.Close()
 
 	// Wait for speaker to flush the streamer before starting the next track
 	time.Sleep(100 * time.Millisecond)
@@ -398,7 +524,6 @@ func (p *Player) playCurrent() {
 		}
 	}
 	p.mu.Unlock()
-
 	if advance || isDone {
 		if isDone {
 			p.mu.Lock()
@@ -426,6 +551,10 @@ func (p *Player) startNext() {
 
 func (p *Player) Previous() {
 	p.mu.Lock()
+	if p.curStream != nil {
+		p.mu.Unlock()
+		return
+	}
 	if p.shuffle {
 		if len(p.done) == 0 {
 			p.mu.Unlock()

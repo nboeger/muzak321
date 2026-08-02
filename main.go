@@ -10,20 +10,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rthornton128/goncurses"
+	"github.com/gdamore/tcell/v2"
 )
 
 type App struct {
-	screen    *Screen
-	player    *Player
-	files     []string
-	shuffle   bool
-	browser   *Browser
-	inBrowser bool
-	running   bool
+	ui      *UI
+	player  *Player
+	browser *Browser
+	shuffle bool
+
+	page       string
+	prevPage   string
+	fromPlayer bool
 }
 
 func resolvePath(path string) ([]string, error) {
+	if isStreamURL(path) {
+		return []string{path}, nil
+	}
 	if strings.ContainsAny(path, "*?[") {
 		matches, err := filepath.Glob(path)
 		if err != nil {
@@ -47,7 +51,7 @@ func resolvePath(path string) ([]string, error) {
 				return err
 			}
 			ext := strings.ToLower(filepath.Ext(p))
-			if ext == ".mp3" || ext == ".m3u" {
+			if isAudioFile(ext) || ext == ".m3u" || ext == ".pls" {
 				matches = append(matches, p)
 			}
 			return nil
@@ -65,6 +69,9 @@ func resolvePath(path string) ([]string, error) {
 	if ext == ".m3u" {
 		return parseM3U(path)
 	}
+	if ext == ".pls" {
+		return parsePLS(path)
+	}
 	return []string{path}, nil
 }
 
@@ -78,18 +85,24 @@ func expandFiles(paths []string) ([]string, error) {
 				return nil, err
 			}
 			result = append(result, files...)
-		} else if ext == ".mp3" {
+		} else if ext == ".pls" {
+			files, err := parsePLS(p)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, files...)
+		} else if isAudioFile(ext) {
 			result = append(result, p)
 		}
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("no mp3 files found")
+		return nil, fmt.Errorf("no audio files found")
 	}
 	return result, nil
 }
 
 func main() {
-	fileArg := flag.String("f", "", "MP3 file, playlist, directory, or glob pattern")
+	fileArg := flag.String("f", "", "audio file, playlist, directory, or glob pattern")
 	help := flag.Bool("h", false, "Show help")
 	shuffle := flag.Bool("s", false, "Shuffle playback")
 	flag.Parse()
@@ -100,18 +113,19 @@ func main() {
 	}
 
 	player := NewPlayer()
-	var screen *Screen
+	a := &App{player: player, shuffle: *shuffle}
+	a.ui = NewUI()
+	a.ui.app.SetInputCapture(a.handleKey)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		player.Stop()
-		if screen != nil {
-			goncurses.End()
-		}
-		os.Exit(0)
+		a.quit()
 	}()
+
+	go a.pumpPlayer()
+	go a.pumpProgress()
 
 	if *fileArg != "" {
 		allArgs := append([]string{*fileArg}, flag.Args()...)
@@ -129,61 +143,27 @@ func main() {
 			os.Exit(1)
 		}
 		player.SetFiles(allFiles, *shuffle)
+		a.showPlayer()
 		player.Start()
 		player.PlayCurrent()
 	} else {
-		var err error
-		screen, err = NewScreen()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing screen: %v\n", err)
-			os.Exit(1)
-		}
-		defer screen.Close()
-
-		browser := NewBrowser()
-		app := &App{
-			screen:    screen,
-			player:    player,
-			browser:   browser,
-			inBrowser: true,
-			running:   true,
-		}
-
-		if err = browser.Navigate("."); err != nil {
-			screen.Close()
+		a.browser = NewBrowser()
+		if err := a.browser.Navigate("."); err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading directory: %v\n", err)
 			os.Exit(1)
 		}
-
-		app.runBrowser()
-		return
+		a.showBrowser()
 	}
 
-	var err error
-	screen, err = NewScreen()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing screen: %v\n", err)
-		os.Exit(1)
-	}
-	defer screen.Close()
-
-	app := &App{
-		screen:  screen,
-		player:  player,
-		running: true,
-	}
-
-	app.runPlayer()
-
-	signal.Stop(sigCh)
-	close(sigCh)
+	a.ui.Run()
 }
 
 func printHelp() {
-	fmt.Println("muzak321 — MP3 Music Player")
+	fmt.Println("muzak321 — Music Player")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  muzak321 -f <file.m3u|file.mp3>   Play a playlist or MP3 file")
+	fmt.Println("  muzak321 -f <file.m3u|file.pls|file.mp3|file.flac|file.ogg|file.wav|stream-url>")
+	fmt.Println("                    Play a playlist, audio file, or live MP3 stream")
 	fmt.Println("  muzak321 -s                        Shuffle playback")
 	fmt.Println("  muzak321 -h                        Show this help")
 	fmt.Println("  muzak321                           File browser mode")
@@ -193,250 +173,287 @@ func printHelp() {
 	fmt.Println("  M        Mute / Unmute")
 	fmt.Println("  P/N      Prev / Next track")
 	fmt.Println("  Up/Down  Volume")
+	fmt.Println("  A        Add songs (opens file browser)")
 	fmt.Println("  Q        Quit")
+	fmt.Println()
+	fmt.Println("In the file browser:")
+	fmt.Println("  Enter          Open directory / play selected file or playlist")
+	fmt.Println("  Shift+A        Add every playable file in the current directory")
+	fmt.Println("  Backspace      Up one directory")
+	fmt.Println()
+	fmt.Println("Streams (.pls, .m3u, direct MP3 URLs):")
+	fmt.Println("  Live SHOUTcast/Icecast streams show the current track via")
+	fmt.Println("  ICY StreamTitle metadata; Prev is disabled while live.")
 }
 
-func (a *App) runBrowser() {
-	for a.running {
-		a.handleResize()
-		entries := a.browser.Entries()
-		a.screen.Browser(entries, a.browser.Cursor(), a.browser.Scroll(), a.browser.Dir())
-		a.screen.Refresh()
+// --- player events ---
 
-		key := a.screen.GetKey()
-		switch key {
-		case 'q', 'Q', 3, 26:
-			a.running = false
-			return
-
-		case 'h', 'H':
-			a.screen.ShowHelp()
-			a.screen.Clear()
-			a.screen.Refresh()
-
-		case goncurses.KEY_UP:
-			a.browser.CursorUp()
-
-		case goncurses.KEY_DOWN:
-			a.browser.CursorDown()
-
-		case goncurses.KEY_ENTER, 13, 10:
-			done, err := a.browser.Enter()
-			if err != nil {
-				a.screen.Message(err.Error())
-				a.screen.GetKey()
-				continue
-			}
-			if done {
-				files := a.browser.SelectedFiles()
-				if len(files) == 0 {
-					a.screen.Message("empty playlist")
-					a.screen.GetKey()
-					continue
-				}
-				a.player = NewPlayer()
-				a.player.SetFiles(files, false)
-				a.player.Start()
-				a.inBrowser = false
-				a.player.PlayCurrent()
-				a.runPlayer()
-				a.inBrowser = true
-			}
-
-		case goncurses.KEY_RESIZE:
-			a.screen.PollResize()
-
-		case goncurses.KEY_BACKSPACE, 127, 8:
-			a.browser.Navigate("..")
+func (a *App) pumpPlayer() {
+	for {
+		select {
+		case <-a.player.fileChanged:
+			a.ui.Queue(a.renderPlayer)
+		case state := <-a.player.stateChan:
+			a.ui.Queue(func() {
+				a.renderPlayer()
+				a.ui.SetStatus(state, a.player.Error())
+			})
+		case <-a.player.metaChan:
+			a.ui.Queue(a.renderPlayer)
 		}
 	}
 }
 
-func (a *App) handleResize() {
-	a.screen.PollResize()
+func (a *App) pumpProgress() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.ui.Queue(func() {
+			if a.page != "player" {
+				return
+			}
+			pos, dur := a.player.Progress()
+			a.ui.SetProgress(pos, dur)
+		})
+	}
+}
+
+// --- navigation ---
+
+func (a *App) showPlayer() {
+	a.page = "player"
+	a.ui.ShowPage("player")
+	a.renderPlayer()
 }
 
 func (a *App) renderPlayer() {
 	p := a.player
 	pos, dur := p.Progress()
-	a.screen.Title(cleanFileName(p.CurrentFile()), p.State(), p.Volume())
-	a.screen.Progress(pos, dur)
-	a.screen.Playlist(p.Files(), p.CurrentIndex())
-	a.screen.StatusBar(p.State(), p.CurrentFile())
+	name := p.CurrentFile()
+	if p.IsStreaming() {
+		name = a.streamName(p.CurrentFile())
+	} else {
+		name = trackDisplayName(name)
+	}
+	a.ui.SetHeader(name, p.State(), p.Volume())
+	a.ui.SetProgress(pos, dur)
+	a.ui.SetPlaylist(p.Files(), p.CurrentIndex())
+	a.ui.SetStatus(p.State(), "")
 }
 
-func (a *App) addToPlaylist() {
-	browser := NewBrowser()
-	if err := browser.Navigate("."); err != nil {
+// streamName prefers the live ICY StreamTitle, falling back to a friendly URL name.
+func (a *App) streamName(url string) string {
+	if t := a.player.StreamTitle(); t != "" {
+		return t
+	}
+	return streamNameFromURL(url)
+}
+
+func (a *App) showBrowser() {
+	a.page = "browser"
+	a.ui.ShowPage("browser")
+	a.refreshBrowser()
+}
+
+func (a *App) refreshBrowser() {
+	entries := a.browser.Entries()
+	a.ui.SetBrowser(a.browser.Dir(), entries, 0)
+}
+
+// --- input ---
+
+func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
+	switch a.page {
+	case "player":
+		return a.playerKey(ev)
+	case "browser":
+		return a.browserKey(ev)
+	case "help":
+		if ev.Key() == tcell.KeyCtrlC {
+			a.quit()
+			return nil
+		}
+		a.page = a.prevPage
+		a.ui.ShowPage(a.prevPage)
+		return nil
+	default:
+		return ev
+	}
+}
+
+func (a *App) playerKey(ev *tcell.EventKey) *tcell.EventKey {
+	switch {
+	case ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' || ev.Rune() == 'Q':
+		a.quit()
+	case ev.Key() == tcell.KeyUp:
+		a.player.SetVolume(a.player.Volume() + 0.1)
+		a.renderPlayer()
+	case ev.Key() == tcell.KeyDown:
+		a.player.SetVolume(a.player.Volume() - 0.1)
+		a.renderPlayer()
+	case ev.Rune() == ' ':
+		if a.player.State() == StatePlaying {
+			a.player.Pause()
+		} else {
+			a.player.Play()
+		}
+		a.renderPlayer()
+	case ev.Rune() == 'm' || ev.Rune() == 'M':
+		if a.player.State() == StateMuted {
+			a.player.Unmute()
+		} else {
+			a.player.Mute()
+		}
+		a.renderPlayer()
+	case ev.Rune() == 'n' || ev.Rune() == 'N':
+		a.player.Next()
+	case ev.Rune() == 'p' || ev.Rune() == 'P':
+		a.player.Previous()
+	case ev.Rune() == 'a' || ev.Rune() == 'A':
+		a.openBrowser()
+	case ev.Rune() == 'h' || ev.Rune() == 'H':
+		a.showHelp("player")
+	default:
+		return ev
+	}
+	return nil
+}
+
+func (a *App) browserKey(ev *tcell.EventKey) *tcell.EventKey {
+	switch {
+	case ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' || ev.Rune() == 'Q':
+		a.quit()
+	case ev.Key() == tcell.KeyUp:
+		a.ui.SetBrowserCurrent(a.ui.browserList.GetCurrentItem() - 1)
+	case ev.Key() == tcell.KeyDown:
+		a.ui.SetBrowserCurrent(a.ui.browserList.GetCurrentItem() + 1)
+	case ev.Key() == tcell.KeyPgUp:
+		a.ui.SetBrowserCurrent(a.ui.browserList.GetCurrentItem() - 10)
+	case ev.Key() == tcell.KeyPgDn:
+		a.ui.SetBrowserCurrent(a.ui.browserList.GetCurrentItem() + 10)
+	case ev.Key() == tcell.KeyHome:
+		a.ui.SetBrowserCurrent(0)
+	case ev.Key() == tcell.KeyEnd:
+		a.ui.SetBrowserCurrent(len(a.browser.Entries()) - 1)
+	case ev.Key() == tcell.KeyEnter:
+		a.browserEnter()
+	case ev.Key() == tcell.KeyBackspace || ev.Key() == tcell.KeyBackspace2:
+		a.browserUp()
+	case ev.Key() == tcell.KeyEsc:
+		a.browserBack()
+	case isShiftA(ev):
+		a.browserAddDir()
+	case ev.Rune() == 'h' || ev.Rune() == 'H':
+		a.showHelp("browser")
+	default:
+		return ev
+	}
+	return nil
+}
+
+func isShiftA(ev *tcell.EventKey) bool {
+	if ev.Key() != tcell.KeyRune {
+		return false
+	}
+	if ev.Rune() == 'A' {
+		return true
+	}
+	return ev.Rune() == 'a' && ev.Modifiers()&tcell.ModShift != 0
+}
+
+// --- browser actions ---
+
+func (a *App) openBrowser() {
+	a.browser = NewBrowser()
+	if err := a.browser.Navigate("."); err != nil {
+		a.ui.SetStatus(StateStopped, err.Error())
+		return
+	}
+	a.fromPlayer = true
+	a.showBrowser()
+}
+
+func (a *App) browserEnter() {
+	entries := a.browser.Entries()
+	cur := a.ui.browserList.GetCurrentItem()
+	if cur < 0 || cur >= len(entries) {
+		return
+	}
+	entry := entries[cur]
+	if entry.IsDir {
+		if err := a.browser.Navigate(entry.Path); err != nil {
+			a.ui.SetBrowserStatus(err.Error())
+			return
+		}
+		a.refreshBrowser()
 		return
 	}
 
-	for {
-		a.handleResize()
-		entries := browser.Entries()
-		a.screen.Browser(entries, browser.Cursor(), browser.Scroll(), browser.Dir())
-		a.screen.Refresh()
+	var files []string
+	if f, ok, err := parsePlaylist(entry.Path); err != nil {
+		a.ui.SetBrowserStatus(err.Error())
+		return
+	} else if ok {
+		files = f
+	} else {
+		files = []string{entry.Path}
+	}
+	a.addFiles(files)
+}
 
-		key := a.screen.GetKey()
-		switch key {
-		case 'q', 'Q', 3, 26:
-			a.screen.Clear()
-			a.renderPlayer()
-			a.screen.Refresh()
-			return
-		case goncurses.KEY_UP:
-			browser.CursorUp()
-		case goncurses.KEY_DOWN:
-			browser.CursorDown()
-		case goncurses.KEY_ENTER, 13, 10:
-			done, err := browser.Enter()
-			if err != nil {
-				a.screen.Message(err.Error())
-				a.screen.GetKey()
-				continue
-			}
-			if done {
-				files := browser.SelectedFiles()
-				if len(files) > 0 {
-					a.player.AppendFiles(files)
-				}
-				a.screen.Clear()
-				a.renderPlayer()
-				a.screen.Refresh()
-				return
-			}
-		case goncurses.KEY_BACKSPACE, 127, 8:
-			browser.Navigate("..")
-		case goncurses.KEY_RESIZE:
-			a.screen.PollResize()
-		}
+func (a *App) browserUp() {
+	parent := filepath.Dir(a.browser.Dir())
+	if parent == a.browser.Dir() {
+		return
+	}
+	if err := a.browser.Navigate(parent); err != nil {
+		return
+	}
+	a.refreshBrowser()
+}
+
+func (a *App) browserBack() {
+	if a.fromPlayer {
+		a.fromPlayer = false
+		a.showPlayer()
 	}
 }
 
-func (a *App) runPlayer() {
-	a.screen.Clear()
-	a.renderPlayer()
-	a.screen.Refresh()
-
-	eqTicker := time.NewTicker(50 * time.Millisecond)
-	defer eqTicker.Stop()
-
-	for a.running {
-		a.handleResize()
-		select {
-		case file := <-a.player.fileChanged:
-			pos, dur := a.player.Progress()
-			a.screen.Title(cleanFileName(file), a.player.State(), a.player.Volume())
-			a.screen.Progress(pos, dur)
-			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
-			a.screen.StatusBar(a.player.State(), file)
-			a.screen.Refresh()
-
-		case state := <-a.player.stateChan:
-			_ = state
-			pos, dur := a.player.Progress()
-			errMsg := a.player.Error()
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), state, a.player.Volume())
-			a.screen.Progress(pos, dur)
-			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
-			a.screen.StatusBar(state, a.player.CurrentFile(), errMsg)
-			a.screen.Refresh()
-			if state == StateStopped {
-				if errMsg != "" {
-					a.screen.StatusBar(state, a.player.CurrentFile(), errMsg+" - press any key")
-				} else {
-					a.screen.StatusBar(state, a.player.CurrentFile(), "Done - press any key")
-				}
-				a.screen.Refresh()
-				if a.inBrowser {
-					a.screen.GetKey()
-					time.Sleep(500 * time.Millisecond)
-					return
-				}
-				a.screen.GetKey()
-				a.running = false
-				return
-			}
-
-		case <-eqTicker.C:
-			pos, dur := a.player.Progress()
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
-			a.screen.Progress(pos, dur)
-			a.screen.Playlist(a.player.Files(), a.player.CurrentIndex())
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
-		default:
-		}
-
-		key := a.screen.GetKey()
-		switch {
-		case key == 'q' || key == 'Q' || key == 3 || key == 26:
-			a.player.Stop()
-			a.running = false
-			return
-
-		case key == ' ':
-			st := a.player.State()
-			switch st {
-			case StatePlaying:
-				a.player.Pause()
-			case StatePaused:
-				a.player.Play()
-			default:
-				a.player.Play()
-			}
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
-		case key == 'm' || key == 'M':
-			st := a.player.State()
-			if st == StateMuted {
-				a.player.Unmute()
-			} else {
-				a.player.Mute()
-			}
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
-		case key == 'n' || key == 'N':
-			a.player.Next()
-
-		case key == goncurses.KEY_UP:
-			v := a.player.Volume()
-			a.player.SetVolume(v + 0.1)
-			pos, dur := a.player.Progress()
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
-			a.screen.Progress(pos, dur)
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
-		case key == goncurses.KEY_DOWN:
-			v := a.player.Volume()
-			a.player.SetVolume(v - 0.1)
-			pos, dur := a.player.Progress()
-			a.screen.Title(cleanFileName(a.player.CurrentFile()), a.player.State(), a.player.Volume())
-			a.screen.Progress(pos, dur)
-			a.screen.StatusBar(a.player.State(), a.player.CurrentFile())
-			a.screen.Refresh()
-
-		case key == 'p' || key == 'P':
-			a.player.Previous()
-
-		case key == 'a' || key == 'A':
-			a.addToPlaylist()
-
-		case key == goncurses.KEY_RESIZE:
-			a.screen.PollResize()
-			a.renderPlayer()
-			a.screen.Refresh()
-
-		case key == 'h' || key == 'H':
-			a.screen.ShowHelp()
-			a.screen.Clear()
-			a.screen.Refresh()
-		}
+func (a *App) browserAddDir() {
+	files, err := a.browser.DirAudioFiles()
+	if err != nil {
+		a.ui.SetBrowserStatus(err.Error())
+		return
 	}
+	if len(files) == 0 {
+		a.ui.SetBrowserStatus("No audio files in this directory")
+		return
+	}
+	a.ui.SetBrowserStatus(fmt.Sprintf("Added %d files", len(files)))
+	a.addFiles(files)
+}
+
+func (a *App) addFiles(files []string) {
+	if a.fromPlayer {
+		a.player.AppendFiles(files)
+		a.fromPlayer = false
+		a.showPlayer()
+		return
+	}
+	a.player.SetFiles(files, a.shuffle)
+	a.showPlayer()
+	a.player.Start()
+	a.player.PlayCurrent()
+}
+
+func (a *App) showHelp(prev string) {
+	a.prevPage = prev
+	a.page = "help"
+	a.ui.ShowHelp()
+	a.ui.ShowPage("help")
+}
+
+func (a *App) quit() {
+	a.player.Stop()
+	a.ui.Stop()
 }

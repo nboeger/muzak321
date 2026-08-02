@@ -14,34 +14,12 @@ type DirEntry struct {
 }
 
 type Browser struct {
-	dir      string
-	entries  []DirEntry
-	cursor   int
-	scroll   int
-	selected []string
+	dir     string
+	entries []DirEntry
 }
 
 func NewBrowser() *Browser {
-	return &Browser{
-		dir:      ".",
-		entries:  nil,
-		cursor:   0,
-		scroll:   0,
-		selected: nil,
-	}
-}
-
-func (b *Browser) SelectedFiles() []string {
-	return b.selected
-}
-
-func (b *Browser) Run() ([]string, error) {
-	b.selected = nil
-	err := b.readDir(".")
-	if err != nil {
-		return nil, err
-	}
-	return b.selected, nil
+	return &Browser{dir: "."}
 }
 
 func (b *Browser) readDir(dirPath string) error {
@@ -63,8 +41,6 @@ func (b *Browser) readDir(dirPath string) error {
 
 	b.dir = abs
 	b.entries = nil
-	b.cursor = 0
-	b.scroll = 0
 
 	var dirs, files []DirEntry
 
@@ -96,7 +72,7 @@ func (b *Browser) readDir(dirPath string) error {
 			}
 		} else {
 			ext := strings.ToLower(filepath.Ext(name))
-			if ext == ".mp3" || ext == ".m3u" {
+			if isAudioFile(ext) || ext == ".m3u" {
 				files = append(files, entry)
 			}
 		}
@@ -125,62 +101,61 @@ func (b *Browser) Dir() string {
 	return b.dir
 }
 
-func (b *Browser) Cursor() int {
-	return b.cursor
-}
-
-func (b *Browser) Scroll() int {
-	return b.scroll
-}
-
-func (b *Browser) CursorUp() {
-	if b.cursor > 0 {
-		b.cursor--
+// DirAudioFiles returns every playable file directly in the current directory:
+// audio files plus any playlists (.m3u) found there, expanded to their tracks.
+func (b *Browser) DirAudioFiles() ([]string, error) {
+	f, err := os.Open(b.dir)
+	if err != nil {
+		return nil, err
 	}
-	if b.cursor < b.scroll {
-		b.scroll = b.cursor
-	}
-}
+	defer f.Close()
 
-func (b *Browser) CursorDown() {
-	if b.cursor < len(b.entries)-1 {
-		b.cursor++
-	}
-	if b.cursor >= b.scroll+maxDisplayEntries() {
-		b.scroll = b.cursor - maxDisplayEntries() + 1
-	}
-}
-
-func (b *Browser) Enter() (bool, error) {
-	if b.cursor < 0 || b.cursor >= len(b.entries) {
-		return false, nil
+	names, err := f.Readdirnames(-1)
+	if err != nil {
+		return nil, err
 	}
 
-	entry := b.entries[b.cursor]
-	if entry.IsDir {
-		files, err := resolvePath(entry.Path)
-		if err != nil {
-			return false, err
+	var result []string
+	for _, name := range names {
+		fullPath := filepath.Join(b.dir, name)
+		info, err := os.Stat(fullPath)
+		if err != nil || info.IsDir() {
+			continue
 		}
-		b.selected = files
-		return true, nil
-	}
-
-	ext := strings.ToLower(filepath.Ext(entry.Path))
-	if ext == ".m3u" {
-		files, err := parseM3U(entry.Path)
-		if err != nil {
-			return false, err
+		ext := strings.ToLower(filepath.Ext(name))
+		if isAudioFile(ext) {
+			result = append(result, fullPath)
+		} else if ext == ".m3u" || ext == ".pls" {
+			files, _, err := parsePlaylist(fullPath)
+			if err != nil {
+				continue
+			}
+			result = append(result, files...)
 		}
-		b.selected = files
-	} else {
-		b.selected = []string{entry.Path}
 	}
-	return true, nil
+	return result, nil
 }
 
-func maxDisplayEntries() int {
-	return 20
+func isAudioFile(ext string) bool {
+	switch ext {
+	case ".mp3", ".flac", ".ogg", ".wav":
+		return true
+	default:
+		return false
+	}
+}
+
+// parsePlaylist expands a playlist file, reporting ok=false for non-playlists.
+func parsePlaylist(path string) (files []string, ok bool, err error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".m3u":
+		f, e := parseM3U(path)
+		return f, true, e
+	case ".pls":
+		f, e := parsePLS(path)
+		return f, true, e
+	}
+	return nil, false, nil
 }
 
 func parseM3U(path string) ([]string, error) {
@@ -217,7 +192,7 @@ func parseM3U(path string) ([]string, error) {
 			continue
 		}
 
-		if filepath.IsAbs(line) {
+		if isStreamURL(line) || filepath.IsAbs(line) {
 			files = append(files, line)
 		} else {
 			files = append(files, filepath.Join(baseDir, line))

@@ -1,15 +1,10 @@
 # muzak321
 
-A command-line MP3 music player with ncurses file browser, progress bar, and playlist display.
+A command-line music player (MP3, FLAC, OGG, WAV) built with [tview](https://github.com/rivo/tview), featuring a file browser, progress bar, and playlist display. It can also stream live Internet radio (SHOUTcast/Icecast MP3) and reads MP3/FLAC/OGG audio tags to show **Title / Artist** while playing.
 
 ## Dependencies
 
 - Go 1.21+
-- PortAudio development library (ALSA backend):
-
-```bash
-sudo apt-get install libportaudio2 portaudio19-dev
-```
 
 ## Build
 
@@ -20,15 +15,17 @@ go build -o muzak321 .
 ## Usage
 
 ```
-muzak321 -f <file>                   Play a file, playlist, directory, or glob
+muzak321 -f <file>                   Play a file, playlist, stream URL, directory, or glob
 muzak321 -s                          Shuffle playback
 muzak321                             File browser mode
 
   -f accepts:
-    song.mp3            single MP3 file
+    song.mp3            single audio file (mp3, flac, ogg, wav)
     playlist.m3u        M3U playlist (tracks play one by one)
-    /path/to/music/     directory (walked recursively for .mp3 / .m3u)
-    '*.mp3'             glob pattern (shell wildcards)
+    stations.pls        PLS stream playlist (remote streams + local tracks)
+    http://...          live MP3 stream (SHOUTcast/Icecast)
+    /path/to/music/     directory (walked recursively for audio / .m3u / .pls)
+    '*.flac'            glob pattern (shell wildcards)
     '1_*.mp3'           wildcard matching
 
 Controls:
@@ -36,21 +33,42 @@ Controls:
   M        Mute / Unmute
   P / N    Prev / Next track
   Up/Down  Volume
-  A        Add songs to the current playlist (opens file browser)
+  A        Add songs (opens the file browser)
   H        Help
   Q        Quit
+
+File browser:
+  Up/Down     Move
+  Enter       Open a directory / add the selected file
+  Shift+A     Add every music file in the current directory
+  Backspace   Go up one directory
+  Esc         Back to the player
+  H           Help
+  Q           Quit
 ```
 
 The player screen shows the current track, a live progress bar with elapsed/duration
 time, and the playlist with the current track highlighted. Volume defaults to 80%.
 
-Press **A** during playback to open the file browser and select more files or
-directories (walked recursively) to append to the playlist. If playback has ended,
-the new tracks start playing immediately.
+For local files, the header shows the audio tag as **Title / Artist** when available
+(MP3, FLAC, OGG), falling back to the file name. `.pls` playlists are resolved
+relative to the playlist file, so they work with both local tracks and remote URLs.
+
+When a remote stream is playing, the header shows the live **StreamTitle** from the
+server's ICY metadata (falling back to a friendly URL name), the progress bar turns
+into a **LIVE** indicator with elapsed time, and **Prev** is disabled (a live stream
+cannot be rewound). Next and the rest of the controls behave as usual.
+
+Press **A** during playback to open the file browser and add songs to the current
+playlist. Browsing a directory does **not** add anything — press **Shift+A** while
+a directory is open to add every music file it contains (including playlists).
+In the standalone file browser (running `muzak321` with no arguments), selecting a
+file or pressing Shift+A starts playback with those tracks.
 
 ## Audio requirements
 
-PortAudio on Linux uses ALSA. For audio to work, one of these is needed:
+Playback uses beep/Oto, which on Linux talks to ALSA. For audio to work, one of
+these is needed:
 
 **Option A — ALSA with PulseAudio/PipeWire (recommended)**
 
