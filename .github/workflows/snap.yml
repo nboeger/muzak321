@@ -2,6 +2,8 @@ name: snap
 
 on:
   push:
+    branches:
+      - main
     tags:
       - '*'
   pull_request:
@@ -40,12 +42,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: muzak321-snap
-          path: .
+          path: muzak321-snap
 
       - name: Publish snap to store (stable)
         uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.STORE_LOGIN }}
         with:
-          snap: ${{ needs.build.outputs.snap-file }}
+          snap: muzak321-snap/${{ needs.build.outputs.snap-file }}
           release: stable
