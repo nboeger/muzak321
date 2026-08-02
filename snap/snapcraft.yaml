@@ -1,6 +1,6 @@
 name: muzak321
 base: core22
-version: git
+version: 0.1.0
 summary: A command-line music player
 title: muzak321 — Music Player
 description: |
@@ -38,7 +38,8 @@ parts:
       - libasound2
     override-build: |
       set -eux
-      VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+      VERSION=$(awk '/^version:/{print $2}' "$CRAFT_PROJECT_DIR/snap/snapcraft.yaml" | head -1)
+      [ -n "$VERSION" ] || VERSION="0.0.0"
       ARCH=$(uname -m)
       case "$ARCH" in
         x86_64)  GOARCH=amd64 ;;
