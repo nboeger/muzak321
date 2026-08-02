@@ -78,8 +78,10 @@ file or pressing Shift+A starts playback with those tracks.
 
 ## Audio requirements
 
-Playback uses beep/Oto, which on Linux talks to ALSA. For audio to work, one of
-these is needed:
+Playback uses beep/Oto, which on Linux talks to ALSA. The Snap Store build
+handles both setups automatically — it routes ALSA through PulseAudio when a
+PulseAudio or PipeWire-pulse server is running, and falls back to direct ALSA
+otherwise. Building from source, one of these is needed:
 
 **Option A — ALSA with PulseAudio/PipeWire (recommended)**
 
