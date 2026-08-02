@@ -22,9 +22,12 @@ license: GPL-3.0
 apps:
   muzak321:
     command: bin/muzak321
+    environment:
+      ALSA_CONFIG_DIR: $SNAP/usr/share/alsa
     plugs:
       - home
       - audio-playback
+      - pulseaudio
       - network
 
 parts:
@@ -36,6 +39,11 @@ parts:
       - libasound2-dev
     stage-packages:
       - libasound2
+      - libasound2-plugins
+      - libasound2-data
+    stage:
+      - -usr/share/doc
+      - -usr/share/lintian
     override-build: |
       set -eux
       VERSION=$(awk '/^version:/{print $2}' "$CRAFT_PROJECT_DIR/snap/snapcraft.yaml" | head -1)
@@ -59,6 +67,10 @@ parts:
         -o muzak321 .
       mkdir -p "$CRAFT_PART_INSTALL/bin"
       cp muzak321 "$CRAFT_PART_INSTALL/bin/"
+      # ALSA default routing: try PulseAudio, fall back to hw (dynamic).
+      mkdir -p "$CRAFT_PART_INSTALL/usr/share/alsa/alsa.conf.d"
+      cp "$CRAFT_PROJECT_DIR/snap/local/alsa/50-muzak321-default.conf" \
+         "$CRAFT_PART_INSTALL/usr/share/alsa/alsa.conf.d/"
       # libasound.so.2 (core22) links libOSSlib.so, which is staged into an
       # oss4-libsalsa/ subdir off the loader path; expose it in the standard lib dir.
       cp -n "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/oss4-libsalsa/libOSSlib.so" \
