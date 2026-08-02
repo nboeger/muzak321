@@ -1,0 +1,37 @@
+name: muzak321
+base: core22
+version: git
+summary: A joy of a command-line music player
+description: |
+  muzak321 is a command-line music player (MP3, FLAC, OGG, WAV) with a file
+  browser, progress bar, and playlist. It streams live Internet radio and
+  reads audio tags to show Title / Artist while playing.
+
+  It plays audio files, M3U and PLS playlists, local directories, glob
+  patterns, and live SHOUTcast/Icecast MP3 streams.
+
+grade: stable
+confinement: strict
+
+apps:
+  muzak321:
+    command: muzak321
+    plugs:
+      - home
+      - audio-playback
+      - network
+
+parts:
+  muzak321:
+    plugin: go
+    source: .
+    build-packages:
+      - golang-go
+      - gcc
+      - libasound2-dev
+    override-build: |
+      craftctl default
+      CGO_ENABLED=1 \
+        go build -trimpath \
+        -ldflags "-s -w -X main.version=$CRAFT_PROJECT_VERSION" \
+        -o "$CRAFT_PART_INSTALL/bin/muzak321" .

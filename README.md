@@ -6,6 +6,16 @@ A command-line music player (MP3, FLAC, OGG, WAV) built with [tview](https://git
 
 - Go 1.21+
 
+It is built on a few great Go packages:
+
+| Package | What it provides |
+| --- | --- |
+| [tview](https://github.com/rivo/tview) | Terminal UI (player, file browser, playlist) |
+| [tcell](https://github.com/gdamore/tcell/v2) | Low-level terminal handling under tview |
+| [beep](https://github.com/faiface/beep) | Decoding & playback engine |
+| [go-mp3](https://github.com/hajimehoshi/go-mp3) | MP3 decoding (incl. live streams) |
+| [tag](https://github.com/dhowden/tag) | MP3/FLAC/OGG metadata for the **Title / Artist** display |
+
 ## Build
 
 ```bash

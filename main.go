@@ -13,6 +13,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+// version is overridden at build time via -ldflags "-X main.version=<ver>".
+var version = "dev"
+
 type App struct {
 	ui      *UI
 	player  *Player
@@ -159,7 +162,7 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("muzak321 — Music Player")
+	fmt.Printf("muzak321 %s — Music Player\n", version)
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  muzak321 -f <file.m3u|file.pls|file.mp3|file.flac|file.ogg|file.wav|stream-url>")
