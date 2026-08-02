@@ -26,10 +26,23 @@ parts:
     plugin: go
     source: .
     build-packages:
-      - golang-go
       - gcc
       - libasound2-dev
     override-build: |
+      set -eux
+      ARCH=$(uname -m)
+      case "$ARCH" in
+        x86_64)  GOARCH=amd64 ;;
+        aarch64) GOARCH=arm64 ;;
+        *) echo "unsupported arch: $ARCH"; exit 1 ;;
+      esac
+      # core22 ships Go 1.22; the project needs >= 1.25.0
+      curl -fsSLo /tmp/go.tgz "https://go.dev/dl/go1.25.0.linux-$GOARCH.tar.gz"
+      rm -rf /tmp/gotoolchain
+      mkdir -p /tmp/gotoolchain
+      tar -C /tmp/gotoolchain --strip-components=1 -xzf /tmp/go.tgz
+      export GOROOT=/tmp/gotoolchain
+      export PATH="$GOROOT/bin:$PATH"
       craftctl default
       CGO_ENABLED=1 \
         go build -trimpath \
