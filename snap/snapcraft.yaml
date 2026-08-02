@@ -1,7 +1,7 @@
 name: muzak321
 base: core22
 version: git
-summary: A joy of a command-line music player
+summary: A command-line music player
 description: |
   muzak321 is a command-line music player (MP3, FLAC, OGG, WAV) with a file
   browser, progress bar, and playlist. It streams live Internet radio and
@@ -12,10 +12,14 @@ description: |
 
 grade: stable
 confinement: strict
+contact: https://github.com/nboeger/muzak321/issues
+issues: https://github.com/nboeger/muzak321/issues
+source-code: https://github.com/nboeger/muzak321
+license: GPL-3.0
 
 apps:
   muzak321:
-    command: muzak321
+    command: bin/muzak321
     plugs:
       - home
       - audio-playback
@@ -23,13 +27,16 @@ apps:
 
 parts:
   muzak321:
-    plugin: go
+    plugin: nil
     source: .
     build-packages:
       - gcc
       - libasound2-dev
+    stage-packages:
+      - libasound2
     override-build: |
       set -eux
+      VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0")
       ARCH=$(uname -m)
       case "$ARCH" in
         x86_64)  GOARCH=amd64 ;;
@@ -43,8 +50,13 @@ parts:
       tar -C /tmp/gotoolchain --strip-components=1 -xzf /tmp/go.tgz
       export GOROOT=/tmp/gotoolchain
       export PATH="$GOROOT/bin:$PATH"
-      craftctl default
       CGO_ENABLED=1 \
         go build -trimpath \
-        -ldflags "-s -w -X main.version=$CRAFT_PROJECT_VERSION" \
-        -o "$CRAFT_PART_INSTALL/bin/muzak321" .
+        -ldflags "-s -w -X main.version=$VERSION" \
+        -o muzak321 .
+      mkdir -p "$CRAFT_PART_INSTALL/bin"
+      cp muzak321 "$CRAFT_PART_INSTALL/bin/"
+      # libasound.so.2 (core22) links libOSSlib.so, which is staged into an
+      # oss4-libsalsa/ subdir off the loader path; expose it in the standard lib dir.
+      cp -n "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/oss4-libsalsa/libOSSlib.so" \
+            "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/" 2>/dev/null || true
