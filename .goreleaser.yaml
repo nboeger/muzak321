@@ -1,0 +1,73 @@
+version: 2
+
+project_name: muzak321
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: muzak321
+    main: .
+    binary: muzak321
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    overrides:
+      - goos: linux
+        goarch: amd64
+        env:
+          - CC=gcc
+      - goos: linux
+        goarch: arm64
+        env:
+          - CC=aarch64-linux-gnu-gcc
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    wrap_in_directory: false
+
+nfpms:
+  - id: muzak321
+    package_name: muzak321
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: nboeger
+    homepage: https://github.com/nboeger/muzak321
+    maintainer: Nathan Boeger <nboeger@gmail.com>
+    description: |-
+      A command-line music player (MP3, FLAC, OGG, WAV) with a file
+      browser, progress bar, and playlist. Streams live Internet radio
+      and reads audio tags to show Title / Artist while playing.
+    license: GPL-3.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    dependencies:
+      - libasound2
+    contents:
+      - src: ./snap/gui/muzak321.png
+        dst: /usr/share/icons/hicolor/512x512/apps/muzak321.png
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
