@@ -24,15 +24,21 @@ jobs:
           sudo snap install snapcraft --classic
           sudo apt-get update -q
           sudo apt-get install -y gcc libasound2-dev
+          export PATH="/snap/bin:$PATH"
+          echo "/snap/bin" >> "$GITHUB_PATH"
+          snapcraft --version
 
       - name: Build snap
         run: |
+          export PATH="/snap/bin:$PATH"
           set +e
           /snap/bin/snapcraft --destructive-mode --verbosity verbose 2>&1 | tee /tmp/snapcraft-build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
-            echo "=== snapcraft log tail ==="
-            tail -100 /tmp/snapcraft-build.log
+            echo "=== FULL snapcraft log ==="
+            cat /tmp/snapcraft-build.log
+            echo "=== snapcraft internal logs ==="
+            find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-10 minutes' -exec cat {} + 2>/dev/null || true
             exit "$rc"
           fi
 
