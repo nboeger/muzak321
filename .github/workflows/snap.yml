@@ -33,14 +33,28 @@ jobs:
           echo "/snap/bin" >> "$GITHUB_PATH"
           snapcraft --version
 
+      - name: Diagnose snapcraft
+        run: |
+          echo "=== snap list ==="
+          snap list 2>&1 | head -20
+          echo "=== snapcraft bin ==="
+          ls -la /snap/bin/snapcraft
+          readlink -f /snap/bin/snapcraft
+          echo "=== snapcraft --version (runner) ==="
+          set +e
+          snapcraft --version 2>&1; echo "rc=$?"
+          echo "=== snapcraft --version (root) ==="
+          sudo snapcraft --version 2>&1; echo "rc=$?"
+          echo "=== snap run snapcraft ==="
+          sudo snap run snapcraft --version 2>&1; echo "rc=$?"
+          echo "=== snap logs ==="
+          sudo journalctl -u snapd --no-pager -n 30 2>&1 | tail -20 || echo "(no journal)"
+          echo "=== core dumps / apparmor ==="
+          sudo dmesg 2>&1 | tail -5 || echo "(no dmesg)"
+
       - name: Build snap
         run: |
           export PATH="/snap/bin:$PATH"
-          echo "=== snapcraft version ==="
-          /snap/bin/snapcraft --version 2>&1 || echo "version check FAILED rc=$?"
-          echo "=== try as root ==="
-          sudo /snap/bin/snapcraft --version 2>&1 || echo "root version check FAILED rc=$?"
-          echo "=== build attempt (as runner) ==="
           set +e
           /snap/bin/snapcraft --destructive-mode >/tmp/snap-build.log 2>/tmp/snap-build.err
           rc=$?
@@ -48,7 +62,6 @@ jobs:
           echo "=== STDOUT ==="; cat /tmp/snap-build.log
           echo "=== STDERR ==="; cat /tmp/snap-build.err
           echo "=== snapcraft internal logs ==="
-          find /root /home/runner "$HOME" -path '*snapcraft*log*' -newermt '-20 minutes' 2>/dev/null | head -20
           find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-20 minutes' -exec cat {} + 2>/dev/null || true
           echo "=== end ==="
           exit "$rc"
