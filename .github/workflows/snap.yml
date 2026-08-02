@@ -31,16 +31,23 @@ jobs:
       - name: Build snap
         run: |
           export PATH="/snap/bin:$PATH"
+          echo "=== snapcraft version ==="
+          /snap/bin/snapcraft --version
+          echo "=== whoami / HOME ==="
+          whoami; echo "HOME=$HOME"
+          echo "=== build attempt ==="
           set +e
-          /snap/bin/snapcraft --destructive-mode --verbosity verbose 2>&1 | tee /tmp/snapcraft-build.log
+          /snap/bin/snapcraft --destructive-mode 2>/tmp/snapcraft-stderr.log | tee /tmp/snapcraft-build.log
           rc=${PIPESTATUS[0]}
-          if [ "$rc" -ne 0 ]; then
-            echo "=== FULL snapcraft log ==="
-            cat /tmp/snapcraft-build.log
-            echo "=== snapcraft internal logs ==="
-            find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-10 minutes' -exec cat {} + 2>/dev/null || true
-            exit "$rc"
-          fi
+          echo "=== SNAPCRAFT EXIT CODE: $rc ==="
+          echo "=== STDOUT (full) ==="
+          cat /tmp/snapcraft-build.log
+          echo "=== STDERR (full) ==="
+          cat /tmp/snapcraft-stderr.log
+          echo "=== snapcraft internal log dir ==="
+          ls -la "$HOME/.local/state/snapcraft/log/" 2>/dev/null
+          find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-10 minutes' -exec cat {} + 2>/dev/null || true
+          exit "$rc"
 
       - name: Upload snapcraft log on failure
         if: failure()
