@@ -2,15 +2,6 @@
 
 A command-line music player (MP3, FLAC, OGG, WAV) built with [tview](https://github.com/rivo/tview), featuring a file browser, progress bar, and playlist display. It can also stream live Internet radio (SHOUTcast/Icecast MP3) and reads MP3/FLAC/OGG audio tags to show **Title / Artist** while playing.
 
-## Screen Shots
-
-![Playlist screen](screen-shots/playlist-screen.png)
-
-![Stream playing](screen-shots/stream-playing.png)
-
-![File browser](screen-shots/file-browser.png)
-
-![Help screen](screen-shots/help-screen.png)
 
 ## Dependencies
 
@@ -113,3 +104,13 @@ sudo usermod -a -G audio $USER
 ```
 
 If playback fails, the app shows a diagnostic message indicating the likely cause (permissions, missing hardware, etc.).
+
+## Screen Shots
+
+![Playlist screen](screen-shots/playlist-screen.png)
+
+![Stream playing](screen-shots/stream-playing.png)
+
+![File browser](screen-shots/file-browser.png)
+
+![Help screen](screen-shots/help-screen.png)
