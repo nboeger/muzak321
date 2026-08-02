@@ -30,12 +30,14 @@ jobs:
           # Replace them with the Ubuntu ports archive, which serves arm64.
           sudo rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list
           echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu jammy main universe" | sudo tee /etc/apt/sources.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main universe" | sudo tee /etc/apt/sources.list.d/arm64.list
+          echo "deb [arch=amd64] http://security.ubuntu.com/ubuntu jammy-security main universe" | sudo tee /etc/apt/sources.list.d/security.list
+          printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-security main universe\n' | sudo tee /etc/apt/sources.list.d/arm64.list
           sudo apt-get update -q
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             libasound2-dev \
-            libasound2-dev:arm64
+            libasound2-dev:arm64 \
+            libc6:arm64
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
