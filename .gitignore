@@ -5,3 +5,7 @@ graphify-out/
 publish-app-plan.md
 snapstore.txt
 snapcraft-credentials.txt
+/parts/
+/stage/
+/prime/
+/*.snap
