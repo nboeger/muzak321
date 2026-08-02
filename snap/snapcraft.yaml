@@ -27,7 +27,6 @@ apps:
     plugs:
       - home
       - audio-playback
-      - pulseaudio
       - network
 
 parts:
