@@ -2,6 +2,7 @@ name: muzak321
 base: core22
 version: git
 summary: A command-line music player
+title: muzak321 — Music Player
 description: |
   muzak321 is a command-line music player (MP3, FLAC, OGG, WAV) with a file
   browser, progress bar, and playlist. It streams live Internet radio and
@@ -14,6 +15,7 @@ grade: stable
 confinement: strict
 contact: https://github.com/nboeger/muzak321/issues
 issues: https://github.com/nboeger/muzak321/issues
+website: https://github.com/nboeger/muzak321
 source-code: https://github.com/nboeger/muzak321
 license: GPL-3.0
 
