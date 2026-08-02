@@ -19,70 +19,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Print runner environment
-        run: |
-          cat /etc/os-release | grep -E 'VERSION_ID|VERSION_CODENAME'
-          ls /usr/lib/x86_64-linux-gnu/libapt-pkg.so.* 2>/dev/null
-
       - name: Install snapcraft and build dependencies
         run: |
+          sudo snap install core22
           sudo snap install snapcraft --classic
           sudo apt-get update -q
           sudo apt-get install -y gcc libasound2-dev
-          export PATH="/snap/bin:$PATH"
           echo "/snap/bin" >> "$GITHUB_PATH"
-          snapcraft --version
-
-      - name: Diagnose snapcraft
-        run: |
-          {
-            echo "=== snap list ==="
-            snap list 2>&1 | head -20
-            echo "=== snapcraft bin ==="
-            ls -la /snap/bin/snapcraft
-            readlink -f /snap/bin/snapcraft
-            echo "=== snapcraft --version (runner) ==="
-            snapcraft --version 2>&1; echo "rc=$?"
-            echo "=== snapcraft --version (root) ==="
-            sudo snapcraft --version 2>&1; echo "rc=$?"
-            echo "=== snap run snapcraft ==="
-            sudo snap run snapcraft --version 2>&1; echo "rc=$?"
-            echo "=== snap logs ==="
-            sudo journalctl -u snapd --no-pager -n 30 2>&1 | tail -20 || echo "(no journal)"
-            echo "=== dmesg ==="
-            sudo dmesg 2>&1 | tail -5 || echo "(no dmesg)"
-          } | tee /tmp/diagnose.log
-          echo "=== WRITING TO STEP SUMMARY ==="
-          cat /tmp/diagnose.log >> "$GITHUB_STEP_SUMMARY"
-          echo "DIAGNOSE_DONE"
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: snapcraft-diagnostics
-          path: /tmp/diagnose.log
 
       - name: Build snap
         run: |
-          export PATH="/snap/bin:$PATH"
-          set +e
-          /snap/bin/snapcraft --destructive-mode >/tmp/snap-build.log 2>/tmp/snap-build.err
-          rc=$?
-          echo "=== SNAPCRAFT EXIT CODE: $rc ==="
-          echo "=== STDOUT ==="; cat /tmp/snap-build.log
-          echo "=== STDERR ==="; cat /tmp/snap-build.err
-          echo "=== snapcraft internal logs ==="
-          find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-20 minutes' -exec cat {} + 2>/dev/null || true
-          echo "=== end ==="
-          exit "$rc"
-
-      - name: Upload snapcraft log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: snapcraft-build-log
-          path: /tmp/snap-build.log
+          snapcraft --destructive-mode
 
       - name: Record snap file name
         id: snap-name
