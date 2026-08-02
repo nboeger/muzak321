@@ -35,22 +35,30 @@ jobs:
 
       - name: Diagnose snapcraft
         run: |
-          echo "=== snap list ==="
-          snap list 2>&1 | head -20
-          echo "=== snapcraft bin ==="
-          ls -la /snap/bin/snapcraft
-          readlink -f /snap/bin/snapcraft
-          echo "=== snapcraft --version (runner) ==="
-          set +e
-          snapcraft --version 2>&1; echo "rc=$?"
-          echo "=== snapcraft --version (root) ==="
-          sudo snapcraft --version 2>&1; echo "rc=$?"
-          echo "=== snap run snapcraft ==="
-          sudo snap run snapcraft --version 2>&1; echo "rc=$?"
-          echo "=== snap logs ==="
-          sudo journalctl -u snapd --no-pager -n 30 2>&1 | tail -20 || echo "(no journal)"
-          echo "=== core dumps / apparmor ==="
-          sudo dmesg 2>&1 | tail -5 || echo "(no dmesg)"
+          {
+            echo "=== snap list ==="
+            snap list 2>&1 | head -20
+            echo "=== snapcraft bin ==="
+            ls -la /snap/bin/snapcraft
+            readlink -f /snap/bin/snapcraft
+            echo "=== snapcraft --version (runner) ==="
+            snapcraft --version 2>&1; echo "rc=$?"
+            echo "=== snapcraft --version (root) ==="
+            sudo snapcraft --version 2>&1; echo "rc=$?"
+            echo "=== snap run snapcraft ==="
+            sudo snap run snapcraft --version 2>&1; echo "rc=$?"
+            echo "=== snap logs ==="
+            sudo journalctl -u snapd --no-pager -n 30 2>&1 | tail -20 || echo "(no journal)"
+            echo "=== dmesg ==="
+            sudo dmesg 2>&1 | tail -5 || echo "(no dmesg)"
+          } | tee /tmp/diagnose.log
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapcraft-diagnostics
+          path: /tmp/diagnose.log
 
       - name: Build snap
         run: |
