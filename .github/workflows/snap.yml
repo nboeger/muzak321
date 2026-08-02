@@ -52,6 +52,9 @@ jobs:
             echo "=== dmesg ==="
             sudo dmesg 2>&1 | tail -5 || echo "(no dmesg)"
           } | tee /tmp/diagnose.log
+          echo "=== WRITING TO STEP SUMMARY ==="
+          cat /tmp/diagnose.log >> "$GITHUB_STEP_SUMMARY"
+          echo "DIAGNOSE_DONE"
 
       - name: Upload diagnostics
         if: always()
