@@ -1,6 +1,6 @@
 name: muzak321
 base: core22
-version: 0.1.0
+version: 0.1.12
 summary: A command-line music player
 title: muzak321 — Music Player
 description: |
