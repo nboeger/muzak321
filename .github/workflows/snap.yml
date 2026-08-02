@@ -13,26 +13,37 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      snap-file: ${{ steps.build-snap.outputs.snap }}
+      snap-file: ${{ steps.snap-name.outputs.snap }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Install snapcraft and build dependencies
+        run: |
+          sudo snap install snapcraft --classic
+          sudo apt-get update -q
+          sudo apt-get install -y gcc libasound2-dev
+
       - name: Build snap
-        id: build-snap
-        uses: snapcore/action-build@v1
+        run: |
+          /snap/bin/snapcraft --destructive-mode
+
+      - name: Record snap file name
+        id: snap-name
+        run: |
+          echo "snap=$(ls *.snap | head -1)" >> "$GITHUB_OUTPUT"
 
       - name: Verify snap installs and runs
         run: |
-          sudo snap install --dangerous "${{ steps.build-snap.outputs.snap }}"
+          sudo snap install --dangerous "${{ steps.snap-name.outputs.snap }}"
           muzak321 -h
 
       - name: Upload snap artifact
         uses: actions/upload-artifact@v4
         with:
           name: muzak321-snap
-          path: ${{ steps.build-snap.outputs.snap }}
+          path: ${{ steps.snap-name.outputs.snap }}
 
   publish:
     runs-on: ubuntu-latest
