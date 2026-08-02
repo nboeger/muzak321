@@ -29,6 +29,10 @@ apps:
       - audio-playback
       - network
 
+layout:
+  /etc/alsa/conf.d:
+    bind: $SNAP/usr/share/alsa/conf.d
+
 parts:
   muzak321:
     plugin: nil
@@ -67,9 +71,12 @@ parts:
       mkdir -p "$CRAFT_PART_INSTALL/bin"
       cp muzak321 "$CRAFT_PART_INSTALL/bin/"
       # ALSA default routing: try PulseAudio, fall back to hw (dynamic).
-      mkdir -p "$CRAFT_PART_INSTALL/usr/share/alsa/alsa.conf.d"
+      # The layout section binds $SNAP/usr/share/alsa/conf.d into
+      # /etc/alsa/conf.d, which the staged alsa.conf loads, so the override is
+      # applied inside the snap.
+      mkdir -p "$CRAFT_PART_INSTALL/usr/share/alsa/conf.d"
       cp "$CRAFT_PROJECT_DIR/snap/local/alsa/50-muzak321-default.conf" \
-         "$CRAFT_PART_INSTALL/usr/share/alsa/alsa.conf.d/"
+         "$CRAFT_PART_INSTALL/usr/share/alsa/conf.d/50-muzak321-default.conf"
       # libasound.so.2 (core22) links libOSSlib.so, which is staged into an
       # oss4-libsalsa/ subdir off the loader path; expose it in the standard lib dir.
       cp -n "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/oss4-libsalsa/libOSSlib.so" \
