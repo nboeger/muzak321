@@ -86,6 +86,10 @@ parts:
       done
       # Remove oss4-libsalsa remnants if any (jammy libasound needs none).
       rm -rf "$CRAFT_PART_INSTALL/usr/lib/$ARCH_TRIPLET/oss4-libsalsa"
+      # The libasound2-plugins deb ships symlinks in etc/alsa/conf.d pointing
+      # outside the snap; the store rejects external symlinks, and we manage
+      # /etc/alsa/conf.d via the layout anyway, so drop them.
+      rm -rf "$CRAFT_PART_INSTALL/etc/alsa/conf.d"
       # libpulsecommon lives in the pulseaudio/ subdir but snapd only searches
       # the main lib dir; expose it there too.
       for f in "$CRAFT_PART_INSTALL/usr/lib/$ARCH_TRIPLET"/pulseaudio/libpulsecommon-*.so; do
