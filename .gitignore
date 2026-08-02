@@ -9,3 +9,4 @@ snapcraft-credentials.txt
 /stage/
 /prime/
 /*.snap
+dist/

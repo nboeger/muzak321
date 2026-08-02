@@ -1,0 +1,14 @@
+#!/bin/sh
+# muzak321 launcher.
+#
+# Inside a strict snap snapd redirects XDG_RUNTIME_DIR to a snap-private
+# directory, so ALSA's PulseAudio plugin cannot find the user's PulseAudio
+# socket at its default location. Point it at the real per-user runtime
+# socket; if no PulseAudio (or PipeWire-pulse) server is running, the ALSA
+# config falls back to the hardware device instead.
+
+export PULSE_SERVER="unix:/run/user/$(id -u)/pulse/native"
+export ALSA_CONFIG_DIR="$SNAP/usr/share/alsa"
+export ALSA_CONFIG_PATH="$SNAP/usr/share/alsa/alsa.conf"
+
+exec "$SNAP/bin/muzak321" "$@"

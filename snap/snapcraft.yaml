@@ -21,9 +21,7 @@ license: GPL-3.0
 
 apps:
   muzak321:
-    command: bin/muzak321
-    environment:
-      ALSA_CONFIG_DIR: $SNAP/usr/share/alsa
+    command: bin/muzak321-launcher
     plugs:
       - home
       - audio-playback
@@ -40,10 +38,6 @@ parts:
     build-packages:
       - gcc
       - libasound2-dev
-    stage-packages:
-      - libasound2
-      - libasound2-plugins
-      - libasound2-data
     stage:
       - -usr/share/doc
       - -usr/share/lintian
@@ -70,6 +64,11 @@ parts:
         -o muzak321 .
       mkdir -p "$CRAFT_PART_INSTALL/bin"
       cp muzak321 "$CRAFT_PART_INSTALL/bin/"
+      # Launcher sets PULSE_SERVER/ALSA paths for the strict-snap runtime and
+      # then execs the real binary.
+      cp "$CRAFT_PROJECT_DIR/snap/local/scripts/muzak321-launcher" \
+         "$CRAFT_PART_INSTALL/bin/muzak321-launcher"
+      chmod +x "$CRAFT_PART_INSTALL/bin/muzak321-launcher"
       # ALSA default routing: try PulseAudio, fall back to hw (dynamic).
       # The layout section binds $SNAP/usr/share/alsa/conf.d into
       # /etc/alsa/conf.d, which the staged alsa.conf loads, so the override is
@@ -77,7 +76,18 @@ parts:
       mkdir -p "$CRAFT_PART_INSTALL/usr/share/alsa/conf.d"
       cp "$CRAFT_PROJECT_DIR/snap/local/alsa/50-muzak321-default.conf" \
          "$CRAFT_PART_INSTALL/usr/share/alsa/conf.d/50-muzak321-default.conf"
-      # libasound.so.2 (core22) links libOSSlib.so, which is staged into an
-      # oss4-libsalsa/ subdir off the loader path; expose it in the standard lib dir.
-      cp -n "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/oss4-libsalsa/libOSSlib.so" \
-            "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/" 2>/dev/null || true
+      # Stage the ALSA->PulseAudio bridge (pulse plugin + libpulse) from the
+      # bundled jammy debs. We avoid stage-package libasound2-plugins because
+      # on newer build hosts it pulls a dependency tree that is incompatible
+      # with the core22 base (glibc too new).
+      ARCH_TRIPLET="$CRAFT_ARCH_TRIPLET_BUILD_FOR"
+      for deb in "$CRAFT_PROJECT_DIR"/snap/local/alsa/debs/*.deb; do
+        dpkg-deb -x "$deb" "$CRAFT_PART_INSTALL"
+      done
+      # Remove oss4-libsalsa remnants if any (jammy libasound needs none).
+      rm -rf "$CRAFT_PART_INSTALL/usr/lib/$ARCH_TRIPLET/oss4-libsalsa"
+      # libpulsecommon lives in the pulseaudio/ subdir but snapd only searches
+      # the main lib dir; expose it there too.
+      for f in "$CRAFT_PART_INSTALL/usr/lib/$ARCH_TRIPLET"/pulseaudio/libpulsecommon-*.so; do
+        [ -e "$f" ] && ln -sf "pulseaudio/$(basename "$f")" "$CRAFT_PART_INSTALL/usr/lib/$ARCH_TRIPLET/$(basename "$f")"
+      done
