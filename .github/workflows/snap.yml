@@ -37,21 +37,20 @@ jobs:
         run: |
           export PATH="/snap/bin:$PATH"
           echo "=== snapcraft version ==="
-          /snap/bin/snapcraft --version
-          echo "=== whoami / HOME ==="
-          whoami; echo "HOME=$HOME"
-          echo "=== build attempt ==="
+          /snap/bin/snapcraft --version 2>&1 || echo "version check FAILED rc=$?"
+          echo "=== try as root ==="
+          sudo /snap/bin/snapcraft --version 2>&1 || echo "root version check FAILED rc=$?"
+          echo "=== build attempt (as runner) ==="
           set +e
-          /snap/bin/snapcraft --destructive-mode 2>/tmp/snapcraft-stderr.log | tee /tmp/snapcraft-build.log
-          rc=${PIPESTATUS[0]}
+          /snap/bin/snapcraft --destructive-mode >/tmp/snap-build.log 2>/tmp/snap-build.err
+          rc=$?
           echo "=== SNAPCRAFT EXIT CODE: $rc ==="
-          echo "=== STDOUT (full) ==="
-          cat /tmp/snapcraft-build.log
-          echo "=== STDERR (full) ==="
-          cat /tmp/snapcraft-stderr.log
-          echo "=== snapcraft internal log dir ==="
-          ls -la "$HOME/.local/state/snapcraft/log/" 2>/dev/null
-          find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-10 minutes' -exec cat {} + 2>/dev/null || true
+          echo "=== STDOUT ==="; cat /tmp/snap-build.log
+          echo "=== STDERR ==="; cat /tmp/snap-build.err
+          echo "=== snapcraft internal logs ==="
+          find /root /home/runner "$HOME" -path '*snapcraft*log*' -newermt '-20 minutes' 2>/dev/null | head -20
+          find "$HOME/.local/state/snapcraft/log" -name '*.log' -newermt '-20 minutes' -exec cat {} + 2>/dev/null || true
+          echo "=== end ==="
           exit "$rc"
 
       - name: Upload snapcraft log on failure
@@ -59,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapcraft-build-log
-          path: /tmp/snapcraft-build.log
+          path: /tmp/snap-build.log
 
       - name: Record snap file name
         id: snap-name
