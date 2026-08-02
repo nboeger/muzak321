@@ -107,11 +107,18 @@ func expandFiles(paths []string) ([]string, error) {
 func main() {
 	fileArg := flag.String("f", "", "audio file, playlist, directory, or glob pattern")
 	help := flag.Bool("h", false, "Show help")
+	versionFlag := flag.Bool("v", false, "Show version")
+	flag.BoolVar(versionFlag, "version", false, "Show version")
 	shuffle := flag.Bool("s", false, "Shuffle playback")
 	flag.Parse()
 
 	if *help {
 		printHelp()
+		return
+	}
+
+	if *versionFlag {
+		fmt.Printf("muzak321 %s\n", version)
 		return
 	}
 
@@ -169,6 +176,7 @@ func printHelp() {
 	fmt.Println("                    Play a playlist, audio file, or live MP3 stream")
 	fmt.Println("  muzak321 -s                        Shuffle playback")
 	fmt.Println("  muzak321 -h                        Show this help")
+	fmt.Println("  muzak321 -v                        Show version")
 	fmt.Println("  muzak321                           File browser mode")
 	fmt.Println()
 	fmt.Println("Controls:")

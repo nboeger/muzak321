@@ -28,6 +28,7 @@ go build -o muzak321 .
 ```
 muzak321 -f <file>                   Play a file, playlist, stream URL, directory, or glob
 muzak321 -s                          Shuffle playback
+muzak321 -v, --version               Show version
 muzak321                             File browser mode
 
   -f accepts:
