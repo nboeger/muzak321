@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -33,8 +34,11 @@ type UI struct {
 	progress    *tview.TextView
 	spectrum    *tview.TextView
 	playlist    *tview.List
+	coverArt    *tview.TextView
 	statusLeft  *tview.TextView
 	statusRight *tview.TextView
+
+	lastCover []byte
 
 	browserHeader *tview.TextView
 	browserList   *tview.List
@@ -90,6 +94,12 @@ func NewUI() *UI {
 		AddItem(u.spectrum, 3, 0, false).
 		AddItem(u.playlist, 0, 1, false).
 		AddItem(status, 1, 0, false)
+
+	u.coverArt = tview.NewTextView().SetDynamicColors(true)
+	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
+	playerPage = tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(playerPage, 0, 1, false).
+		AddItem(u.coverArt, CoverArtWidth, 0, false)
 
 	// --- browser page ---
 	u.browserHeader = newBar()
@@ -236,6 +246,20 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		}
 	}
 	u.spectrum.SetText(sb.String())
+}
+
+// SetCoverArt renders the current file's embedded art; empty input clears the
+// pane. The rendered string is cached so it is not re-rendered on every tick.
+func (u *UI) SetCoverArt(data []byte, mime string) {
+	if bytes.Equal(data, u.lastCover) {
+		return
+	}
+	u.lastCover = data
+	if len(data) == 0 {
+		u.coverArt.SetText("")
+		return
+	}
+	u.coverArt.SetText(coverArtBlock(data, CoverArtWidth, CoverArtHeight))
 }
 
 func (u *UI) SetPlaylist(files []string, current int) {

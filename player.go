@@ -16,6 +16,7 @@ import (
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/beep/vorbis"
 	"github.com/faiface/beep/wav"
+	"github.com/dhowden/tag"
 )
 
 func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {
@@ -115,6 +116,9 @@ type Player struct {
 
 	curStream    *Stream
 	curMP3Stream *mp3Stream
+
+	coverData []byte
+	coverMIME string
 
 	tap          *sampleTap
 	bandEdges    []float64
@@ -321,6 +325,31 @@ func (p *Player) SeekTo(pos time.Duration) error {
 func (p *Player) SeekRelative(delta time.Duration) error {
 	pos, _ := p.Progress()
 	return p.SeekTo(pos + delta)
+}
+
+// CoverArt returns the current file's embedded art bytes + MIME, or nil.
+func (p *Player) CoverArt() ([]byte, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.coverData, p.coverMIME
+}
+
+// readCoverArt extracts the embedded picture (JPEG/PNG) from a file's tags.
+func readCoverArt(path string) ([]byte, string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, ""
+	}
+	defer f.Close()
+	m, err := tag.ReadFrom(f)
+	if err != nil {
+		return nil, ""
+	}
+	pic := m.Picture()
+	if pic == nil {
+		return nil, ""
+	}
+	return pic.Data, pic.MIMEType
 }
 
 // StreamTitle returns the live ICY StreamTitle, or "" when not on a stream.
@@ -598,6 +627,11 @@ func (p *Player) playCurrent() {
 	p.curStream = liveStream
 	p.curMP3Stream = curMS
 	p.sampleRate = sr
+	if liveStream == nil {
+		p.coverData, p.coverMIME = readCoverArt(file)
+	} else {
+		p.coverData, p.coverMIME = nil, ""
+	}
 	p.mu.Unlock()
 
 	volStr := &volStreamer{inner: streamer, volume: p.volume, tap: p.tap}

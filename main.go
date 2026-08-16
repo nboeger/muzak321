@@ -284,6 +284,7 @@ func (a *App) renderPlayer() {
 	a.ui.SetHeader(name, p.State(), p.Volume())
 	a.ui.SetProgress(pos, dur)
 	a.ui.SetPlaylist(p.Files(), p.CurrentIndex())
+	a.ui.SetCoverArt(p.CoverArt())
 	a.ui.SetStatus(p.State(), "")
 }
 
