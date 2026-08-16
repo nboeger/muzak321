@@ -31,6 +31,7 @@ type UI struct {
 	headerLeft  *tview.TextView
 	headerRight *tview.TextView
 	progress    *tview.TextView
+	spectrum    *tview.TextView
 	playlist    *tview.List
 	statusLeft  *tview.TextView
 	statusRight *tview.TextView
@@ -66,6 +67,9 @@ func NewUI() *UI {
 	u.progress = tview.NewTextView().SetDynamicColors(true)
 	u.progress.SetBackgroundColor(tcell.ColorBlack)
 
+	u.spectrum = tview.NewTextView().SetDynamicColors(true)
+	u.spectrum.SetBackgroundColor(tcell.ColorBlack)
+
 	u.playlist = tview.NewList()
 	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 	u.playlist.ShowSecondaryText(false)
@@ -83,6 +87,7 @@ func NewUI() *UI {
 	playerPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 1, 0, false).
 		AddItem(u.progress, 1, 0, false).
+		AddItem(u.spectrum, 3, 0, false).
 		AddItem(u.playlist, 0, 1, false).
 		AddItem(status, 1, 0, false)
 
@@ -183,6 +188,54 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 		colBarFill, strings.Repeat(" ", filled),
 		colReset, "[black]", strings.Repeat(" ", barWidth-filled),
 		colReset, "[yellow]", timeStr) + colReset)
+}
+
+const spectrumGlyphs = "▁▂▃▄▅▆▇█"
+
+var spectrumGlyphRunes = []rune(spectrumGlyphs)
+
+// SetSpectrum renders the spectrum frame as 3 rows of block glyphs, one
+// column per band (24 levels total per band). active=false renders a dimmed
+// flat baseline; empty values (stopped) clear the view.
+func (u *UI) SetSpectrum(values []float64, active bool) {
+	if len(values) == 0 {
+		u.spectrum.SetText("")
+		return
+	}
+	var sb strings.Builder
+	for row := 0; row < 3; row++ {
+		for _, v := range values {
+			if !active {
+				// Dimmed flat baseline: one dim block per column, bottom row.
+				if row == 2 {
+					sb.WriteString("[#444444]▁[-]")
+				} else {
+					sb.WriteString(" ")
+				}
+				continue
+			}
+			level := int(v * 24)
+			if level > 24 {
+				level = 24
+			}
+			cells := level - (2-row)*8 // cells filled in this row, bottom-up
+			if cells < 0 {
+				cells = 0
+			}
+			if cells > 8 {
+				cells = 8
+			}
+			glyph := " "
+			if cells > 0 {
+				glyph = string(spectrumGlyphRunes[cells-1])
+			}
+			fmt.Fprintf(&sb, "[#%s]%s[-]", spectrumColor(v), glyph)
+		}
+		if row < 2 {
+			sb.WriteByte('\n')
+		}
+	}
+	u.spectrum.SetText(sb.String())
 }
 
 func (u *UI) SetPlaylist(files []string, current int) {

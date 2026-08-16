@@ -136,6 +136,7 @@ func main() {
 
 	go a.pumpPlayer()
 	go a.pumpProgress()
+	go a.pumpSpectrum()
 
 	// Play mode: an explicit -f flag OR any positional argument (file,
 	// playlist, directory, glob, or stream URL). Without either, fall
@@ -240,6 +241,23 @@ func (a *App) pumpProgress() {
 			}
 			pos, dur := a.player.Progress()
 			a.ui.SetProgress(pos, dur)
+		})
+	}
+}
+
+// pumpSpectrum animates the spectrum equalizer at ~30 fps while the player
+// page is visible. When paused the bars freeze dimmed; when stopped the view
+// clears.
+func (a *App) pumpSpectrum() {
+	ticker := time.NewTicker(33 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.ui.Queue(func() {
+			if a.page != "player" {
+				return
+			}
+			active := a.player.State() == StatePlaying
+			a.ui.SetSpectrum(a.player.Spectrum(), active)
 		})
 	}
 }

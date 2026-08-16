@@ -53,14 +53,25 @@ type volStreamer struct {
 	mu     sync.Mutex
 	inner  beep.Streamer
 	volume float64
+	tap    *sampleTap // nil when disabled; set on the player's streamers
 }
 
 func (v *volStreamer) Stream(samples [][2]float64) (int, bool) {
 	v.mu.Lock()
 	vol := v.volume
+	tap := v.tap
 	v.mu.Unlock()
 
 	n, ok := v.inner.Stream(samples)
+	// Tap the RAW samples (before the volume multiply): mono-mix into the
+	// spectrum ring buffer. No-op when nil; a memcpy at most on the audio path.
+	if tap != nil && n > 0 {
+		mono := make([]float64, n)
+		for i := range samples[:n] {
+			mono[i] = (samples[i][0] + samples[i][1]) / 2
+		}
+		tap.write(mono)
+	}
 	if ok && vol != 1.0 {
 		for i := range samples[:n] {
 			samples[i][0] *= float64(vol)
@@ -99,6 +110,10 @@ type Player struct {
 	curStream    *Stream
 	curMP3Stream *mp3Stream
 
+	tap          *sampleTap
+	bandEdges    []float64
+	spectrumPrev []float64
+
 	stopCh      chan struct{}
 	fileChanged chan string
 	stateChan   chan PlayerState
@@ -118,6 +133,8 @@ func NewPlayer() *Player {
 		stateChan:   make(chan PlayerState, 4),
 		playNext:    make(chan struct{}, 1),
 		metaChan:    make(chan struct{}, 1),
+		tap:         newSampleTap(SpectrumWindow),
+		bandEdges:   spectrumBandEdges(),
 		initSpeak:   speaker.Init,
 		playSpeak:   func(s beep.Streamer) { speaker.Play(s) },
 	}
@@ -221,6 +238,45 @@ func (p *Player) Progress() (pos, dur time.Duration) {
 		dur = samplesToDuration(p.streamer.Len(), sr)
 	}
 	return
+}
+
+// Spectrum returns a smoothed SpectrumBands-wide frame in [0,1], or nil when
+// stopped / before enough audio has been tapped. Attack/decay smoothing blends
+// against the previous frame: fast attack (SpectrumAttack) on the rise, slower
+// decay (SpectrumDecay) on the fall.
+func (p *Player) Spectrum() []float64 {
+	p.mu.RLock()
+	state := p.state
+	tap := p.tap
+	sr := p.sampleRate
+	p.mu.RUnlock()
+	if state == StateStopped || tap == nil || sr == 0 {
+		return nil
+	}
+	win := tap.window(SpectrumWindow)
+	if len(win) < SpectrumWindow {
+		return nil
+	}
+	bands := spectrumBands(win, p.bandEdges, int(sr))
+
+	p.mu.Lock()
+	prev := p.spectrumPrev
+	var out []float64
+	if len(prev) != len(bands) {
+		out = bands
+	} else {
+		out = make([]float64, len(bands))
+		for i, v := range bands {
+			if v >= prev[i] {
+				out[i] = SpectrumAttack*v + (1-SpectrumAttack)*prev[i]
+			} else {
+				out[i] = SpectrumDecay*v + (1-SpectrumDecay)*prev[i]
+			}
+		}
+	}
+	p.spectrumPrev = out
+	p.mu.Unlock()
+	return out
 }
 
 // StreamTitle returns the live ICY StreamTitle, or "" when not on a stream.
@@ -420,6 +476,9 @@ func (p *Player) playCurrent() {
 	// Next/Previous/startNext); it carries no meaning into playback itself, so
 	// consume it now to avoid leaking it into this track's own advance logic.
 	p.nextRequested = false
+	// Fresh track: drop the previous track's spectrum state.
+	p.spectrumPrev = nil
+	p.tap.reset()
 	p.mu.Unlock()
 
 	var streamer beep.Streamer
@@ -497,7 +556,7 @@ func (p *Player) playCurrent() {
 	p.sampleRate = sr
 	p.mu.Unlock()
 
-	volStr := &volStreamer{inner: streamer, volume: p.volume}
+	volStr := &volStreamer{inner: streamer, volume: p.volume, tap: p.tap}
 	ctrl := &beep.Ctrl{Streamer: volStr}
 	trackDone := make(chan struct{})
 	abort := make(chan struct{})
