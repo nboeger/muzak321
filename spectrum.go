@@ -9,13 +9,13 @@ import (
 
 // Spectrum constants.
 const (
-	SpectrumWindow    = 4096                    // FFT window: ~93 ms at 44.1 kHz
-	SpectrumBands     = 14                      // log-spaced output bands
-	SpectrumBandMinHz = 40.0                    // lowest band edge
-	SpectrumBandMaxHz = 16000.0                 // highest band edge
-	SpectrumAttack    = 0.6                     // blend toward rising values
-	SpectrumDecay     = 0.85                    // blend toward falling values
-	SpectrumDbFloor   = 60.0                    // -60 dB maps to 0 (silence ~= 0)
+	SpectrumWindow    = 4096    // FFT window: ~93 ms at 44.1 kHz
+	SpectrumBands     = 14      // log-spaced output bands
+	SpectrumBandMinHz = 40.0    // lowest band edge
+	SpectrumBandMaxHz = 16000.0 // highest band edge
+	SpectrumAttack    = 0.6     // blend toward rising values
+	SpectrumDecay     = 0.85    // blend toward falling values
+	SpectrumDbFloor   = 60.0    // -60 dB maps to 0 (silence ~= 0)
 )
 
 // sampleTap keeps the most recent window of mono samples as a ring buffer.

@@ -16,11 +16,11 @@ type fakeSeekCloser struct {
 func (f *fakeSeekCloser) Stream(samples [][2]float64) (int, bool) {
 	return 0, false
 }
-func (f *fakeSeekCloser) Err() error          { return nil }
-func (f *fakeSeekCloser) Len() int            { return f.len }
-func (f *fakeSeekCloser) Position() int       { return f.pos }
-func (f *fakeSeekCloser) Seek(n int) error    { f.pos = n; return nil }
-func (f *fakeSeekCloser) Close() error        { return nil }
+func (f *fakeSeekCloser) Err() error       { return nil }
+func (f *fakeSeekCloser) Len() int         { return f.len }
+func (f *fakeSeekCloser) Position() int    { return f.pos }
+func (f *fakeSeekCloser) Seek(n int) error { f.pos = n; return nil }
+func (f *fakeSeekCloser) Close() error     { return nil }
 
 var _ beep.StreamSeekCloser = (*fakeSeekCloser)(nil)
 

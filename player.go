@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dhowden/tag"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/flac"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/beep/vorbis"
 	"github.com/faiface/beep/wav"
-	"github.com/dhowden/tag"
 )
 
 func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {

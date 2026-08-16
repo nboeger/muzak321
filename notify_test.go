@@ -9,9 +9,9 @@ import (
 // "Title — Artist" or the file name when there are no tags.
 func TestNotifyArgs(t *testing.T) {
 	tests := []struct {
-		name         string
+		name                string
 		title, artist, file string
-		want         []string
+		want                []string
 	}{
 		{"title and artist", "Song", "Artist", "/music/song.mp3", []string{"muzak321", "Song — Artist"}},
 		{"title only", "Song", "", "/music/song.mp3", []string{"muzak321", "Song"}},

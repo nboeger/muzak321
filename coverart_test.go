@@ -19,8 +19,8 @@ func testPNG(t *testing.T) []byte {
 			img.Set(x, y, color.RGBA{10, 20, 30, 255})
 		}
 	}
-	img.Set(0, 0, color.RGBA{255, 0, 0, 255})   // upper-left: red
-	img.Set(0, 1, color.RGBA{0, 0, 255, 255})   // lower-left: blue
+	img.Set(0, 0, color.RGBA{255, 0, 0, 255})     // upper-left: red
+	img.Set(0, 1, color.RGBA{0, 0, 255, 255})     // lower-left: blue
 	img.Set(w-1, h-1, color.RGBA{0, 255, 0, 255}) // bottom-right: green
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
