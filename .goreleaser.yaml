@@ -62,6 +62,25 @@ nfpms:
 checksum:
   name_template: "checksums.txt"
 
+# Arch User Repository (AUR) — staged: generates muzak321-bin PKGBUILD into
+# dist/ on every release without publishing (skip_upload: true). To go live:
+# 1. Register on https://aur.archlinux.org (retry if 503; it is not global),
+#    create the muzak321-bin package, and add your AUR SSH key.
+# 2. Add the unencrypted AUR SSH private key as the AUR_KEY repo secret.
+# 3. Set skip_upload to false.
+aurs:
+  - name: muzak321-bin
+    homepage: https://github.com/nboeger/muzak321
+    description: "Command-line music player (MP3, FLAC, OGG, WAV) with a file browser, progress bar, and playlist"
+    maintainers:
+      - "Nathan Boeger <nboeger@gmail.com>"
+    license: GPL-3.0
+    depends:
+      - alsa-lib
+    git_url: "ssh://aur@aur.archlinux.org/muzak321-bin.git"
+    private_key: "{{ .Env.AUR_KEY }}"
+    skip_upload: true
+
 changelog:
   sort: asc
   filters:
