@@ -18,6 +18,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # git describe (used for the snap version) needs every tag,
+          # not just the ref being built.
+          fetch-tags: true
 
       - name: Install snapcraft and build dependencies
         run: |
