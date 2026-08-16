@@ -659,6 +659,8 @@ func (p *Player) playCurrent() {
 	p.sampleRate = sr
 	if liveStream == nil {
 		p.coverData, p.coverMIME = readCoverArt(file)
+		title, artist := trackTitleArtist(file)
+		notify(title, artist, file)
 		lines, lerr := loadLRC(file)
 		if lerr == nil {
 			p.lyrics = lines
