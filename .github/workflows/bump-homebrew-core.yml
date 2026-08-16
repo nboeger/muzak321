@@ -1,0 +1,71 @@
+name: bump-homebrew-core
+
+# On every new tag, compute the source-archive sha256 and open a PR against
+# Homebrew/homebrew-core updating Formula/m/muzak321.rb.
+#
+# Setup: fork https://github.com/Homebrew/homebrew-core to nboeger/homebrew-core,
+# then add a GitHub PAT (repo scope) as the HOMEBREW_CORE_TOKEN repository secret.
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout muzak321
+        uses: actions/checkout@v4
+
+      - name: Compute source archive sha256
+        id: sha
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          URL="https://github.com/nboeger/muzak321/archive/refs/tags/${TAG}.tar.gz"
+          SHA="$(curl -fsSL "${URL}" | sha256sum | awk '{print $1}')"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
+          echo "url=${URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout homebrew-core fork
+        uses: actions/checkout@v4
+        with:
+          repository: nboeger/homebrew-core
+          token: ${{ secrets.HOMEBREW_CORE_TOKEN }}
+          path: homebrew-core
+          fetch-depth: 0
+
+      - name: Update and push formula
+        working-directory: homebrew-core
+        env:
+          TAG: ${{ steps.sha.outputs.tag }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          URL: ${{ steps.sha.outputs.url }}
+        run: |
+          git config user.name "nboeger"
+          git config user.email "nboeger@users.noreply.github.com"
+          git checkout -b "muzak321-${TAG}"
+          FORMULA="Formula/m/muzak321.rb"
+          sed -i "s|url \".*\"|url \"${URL}\"|" "${FORMULA}"
+          sed -i "s|sha256 \"[0-9a-f]\{64\}\"|sha256 \"${SHA}\"|" "${FORMULA}"
+          git add "${FORMULA}"
+          git commit -m "muzak321 ${TAG}"
+          git push origin "muzak321-${TAG}"
+
+      - name: Open pull request
+        working-directory: homebrew-core
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_CORE_TOKEN }}
+          TAG: ${{ steps.sha.outputs.tag }}
+        run: |
+          gh pr create \
+            --repo Homebrew/homebrew-core \
+            --base master \
+            --head "nboeger:muzak321-${TAG}" \
+            --title "muzak321 ${TAG}" \
+            --body "Automated version bump for muzak321 ${TAG}." || echo "PR already exists or creation skipped"
