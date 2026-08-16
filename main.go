@@ -137,10 +137,13 @@ func main() {
 	go a.pumpPlayer()
 	go a.pumpProgress()
 
-	if *fileArg != "" {
-		allArgs := append([]string{*fileArg}, flag.Args()...)
+	// Play mode: an explicit -f flag OR any positional argument (file,
+	// playlist, directory, glob, or stream URL). Without either, fall
+	// back to the file browser.
+	sources := playArgs(*fileArg, flag.Args())
+	if len(sources) > 0 {
 		var allFiles []string
-		for _, arg := range allArgs {
+		for _, arg := range sources {
 			files, err := resolvePath(arg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -168,12 +171,24 @@ func main() {
 	a.ui.Run()
 }
 
+// playArgs combines the -f flag value (if any) with the positional
+// arguments, so both "muzak321 -f song.mp3" and "muzak321 song.mp3" play.
+func playArgs(fileArg string, args []string) []string {
+	all := make([]string, 0, len(args)+1)
+	if fileArg != "" {
+		all = append(all, fileArg)
+	}
+	return append(all, args...)
+}
+
 func printHelp() {
 	fmt.Printf("muzak321 %s — Music Player\n", version)
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  muzak321 -f <file.m3u|file.pls|file.mp3|file.flac|file.ogg|file.wav|stream-url>")
-	fmt.Println("                    Play a playlist, audio file, or live MP3 stream")
+	fmt.Println("  muzak321 <file.m3u|file.pls|file.mp3|file.flac|file.ogg|file.wav|directory|stream-url> [more files...]")
+	fmt.Println("                    Play a playlist, audio file, directory, or live MP3 stream")
+	fmt.Println("  muzak321 -f <file|playlist|directory|glob>")
+	fmt.Println("                    Same as above, with an explicit flag")
 	fmt.Println("  muzak321 -s                        Shuffle playback")
 	fmt.Println("  muzak321 -h                        Show this help")
 	fmt.Println("  muzak321 -v                        Show version")
