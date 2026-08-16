@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +80,7 @@ type Player struct {
 	files      []string
 	currentIdx int
 	shuffle    bool
-	done       []int
+	order      []int
 
 	nextRequested bool
 	errorMsg      string
@@ -103,7 +104,6 @@ type Player struct {
 	stateChan   chan PlayerState
 	playNext    chan struct{}
 	metaChan    chan struct{}
-	rng         seededRand
 
 	initSpeak func(sr beep.SampleRate, bufferSize int) error
 	playSpeak func(s beep.Streamer)
@@ -242,10 +242,10 @@ func (p *Player) IsStreaming() bool {
 func (p *Player) CurrentFile() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.currentIdx < 0 || p.currentIdx >= len(p.files) {
+	if p.currentIdx < 0 || p.currentIdx >= len(p.order) {
 		return ""
 	}
-	return p.files[p.currentIdx]
+	return p.files[p.order[p.currentIdx]]
 }
 
 func (p *Player) Files() []string {
@@ -254,31 +254,72 @@ func (p *Player) Files() []string {
 	return p.files
 }
 
+// CurrentIndex returns the position of the current song in the playlist
+// (the file index, not the position in the playback order).
 func (p *Player) CurrentIndex() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.currentIdx
+	if p.currentIdx < 0 || p.currentIdx >= len(p.order) {
+		return -1
+	}
+	return p.order[p.currentIdx]
+}
+
+// playbackOrder returns the order of file indices to play: identity for
+// normal mode, a Fisher-Yates permutation for shuffle mode. The shuffle
+// permutation gives a random starting song and plays every file exactly
+// once, with no rejection sampling and no modulo bias (math/rand/v2).
+func playbackOrder(n int, shuffle bool) []int {
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	if !shuffle {
+		return order
+	}
+	for i := n - 1; i > 0; i-- {
+		j := rand.IntN(i + 1)
+		order[i], order[j] = order[j], order[i]
+	}
+	return order
 }
 
 func (p *Player) SetFiles(files []string, shuffle bool) {
 	p.mu.Lock()
 	p.files = files
 	p.shuffle = shuffle
+	p.order = playbackOrder(len(files), shuffle)
 	p.currentIdx = 0
-	if shuffle {
-		p.done = make([]int, 0, len(files))
-	} else {
-		p.done = nil
-	}
 	p.mu.Unlock()
 }
 
 func (p *Player) AppendFiles(files []string) {
 	p.mu.Lock()
 	wasStopped := p.state == StateStopped
+	firstNew := len(p.files)
 	p.files = append(p.files, files...)
 	if wasStopped && len(p.files) > 0 {
-		p.currentIdx = len(p.files) - len(files)
+		// Fresh start: rebuild the playback order over the combined list
+		// and begin on one of the just-added files.
+		p.order = playbackOrder(len(p.files), p.shuffle)
+		p.currentIdx = 0
+		for i, idx := range p.order {
+			if idx >= firstNew {
+				p.currentIdx = i
+				break
+			}
+		}
+	} else if p.shuffle {
+		// Mid-cycle: extend the order with the new indices, shuffled among
+		// themselves, so they play after the current cycle's remaining songs.
+		start := len(p.order)
+		for _, idx := range playbackOrder(len(files), true) {
+			p.order = append(p.order, idx+start)
+		}
+	} else {
+		for i := firstNew; i < len(p.files); i++ {
+			p.order = append(p.order, i)
+		}
 	}
 	p.mu.Unlock()
 	if wasStopped {
@@ -374,7 +415,7 @@ func (p *Player) playCurrent() {
 	}
 
 	p.closeDecoderLocked()
-	file := p.files[p.currentIdx]
+	file := p.files[p.order[p.currentIdx]]
 	// A "next" request only armed this track by advancing currentIdx (in
 	// Next/Previous/startNext); it carries no meaning into playback itself, so
 	// consume it now to avoid leaking it into this track's own advance logic.
@@ -517,11 +558,8 @@ func (p *Player) playCurrent() {
 	advance := p.nextRequested
 	p.nextRequested = false
 	isDone := false
-	if !advance {
-		if (!p.shuffle && p.currentIdx+1 >= len(p.files)) ||
-			(p.shuffle && len(p.done) >= len(p.files)) {
-			isDone = true
-		}
+	if !advance && p.currentIdx+1 >= len(p.order) {
+		isDone = true
 	}
 	p.mu.Unlock()
 	if advance || isDone {
@@ -555,67 +593,22 @@ func (p *Player) Previous() {
 		p.mu.Unlock()
 		return
 	}
-	if p.shuffle {
-		if len(p.done) == 0 {
-			p.mu.Unlock()
-			return
-		}
-		idx := p.rng.Intn(len(p.files))
-		for {
-			used := false
-			for _, d := range p.done {
-				if d == idx {
-					used = true
-					break
-				}
-			}
-			if !used {
-				p.currentIdx = idx
-				p.done = append(p.done, idx)
-				break
-			}
-			idx = p.rng.Intn(len(p.files))
-		}
-	} else {
-		if p.currentIdx-1 < 0 {
-			p.mu.Unlock()
-			return
-		}
-		p.currentIdx--
+	if p.currentIdx-1 < 0 {
+		p.mu.Unlock()
+		return
 	}
+	p.currentIdx--
 	p.mu.Unlock()
 	p.startNext()
 }
 
 func (p *Player) Next() {
 	p.mu.Lock()
-	if p.shuffle {
-		if len(p.done) >= len(p.files) {
-			p.mu.Unlock()
-			return
-		}
-		for {
-			idx := p.rng.Intn(len(p.files))
-			used := false
-			for _, d := range p.done {
-				if d == idx {
-					used = true
-					break
-				}
-			}
-			if !used {
-				p.currentIdx = idx
-				p.done = append(p.done, idx)
-				break
-			}
-		}
-	} else {
-		if p.currentIdx+1 >= len(p.files) {
-			p.mu.Unlock()
-			return
-		}
-		p.currentIdx++
+	if p.currentIdx+1 >= len(p.order) {
+		p.mu.Unlock()
+		return
 	}
+	p.currentIdx++
 	p.mu.Unlock()
 	p.startNext()
 }
@@ -626,16 +619,4 @@ func (p *Player) PlayCurrent() {
 	case p.playNext <- struct{}{}:
 	default:
 	}
-}
-
-type seededRand struct {
-	state uint64
-}
-
-func (r *seededRand) Intn(n int) int {
-	if r.state == 0 {
-		r.state = uint64(time.Now().UnixNano())
-	}
-	r.state = r.state*6364136223846793005 + 1442695040888963407
-	return int(r.state % uint64(n))
 }
