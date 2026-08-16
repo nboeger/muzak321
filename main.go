@@ -200,6 +200,8 @@ func printHelp() {
 	fmt.Println("  M        Mute / Unmute")
 	fmt.Println("  P/N      Prev / Next track")
 	fmt.Println("  Up/Down  Volume")
+	fmt.Println("  <-/->    Seek -5s / +5s (Shift: -30s / +30s)")
+	fmt.Println("  Home/End Seek start / end of track")
 	fmt.Println("  A        Add songs (opens file browser)")
 	fmt.Println("  Q        Quit")
 	fmt.Println()
@@ -353,6 +355,32 @@ func (a *App) playerKey(ev *tcell.EventKey) *tcell.EventKey {
 		a.player.Next()
 	case ev.Rune() == 'p' || ev.Rune() == 'P':
 		a.player.Previous()
+	case ev.Key() == tcell.KeyLeft || ev.Key() == tcell.KeyRight:
+		delta := SeekStep
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			delta = SeekStepLarge
+		}
+		if ev.Key() == tcell.KeyLeft {
+			delta = -delta
+		}
+		if err := a.player.SeekRelative(delta); err != nil {
+			a.ui.SetStatus(StateStopped, err.Error())
+		} else {
+			a.renderPlayer()
+		}
+	case ev.Key() == tcell.KeyHome:
+		if err := a.player.SeekTo(0); err != nil {
+			a.ui.SetStatus(StateStopped, err.Error())
+		} else {
+			a.renderPlayer()
+		}
+	case ev.Key() == tcell.KeyEnd:
+		_, dur := a.player.Progress()
+		if err := a.player.SeekTo(dur); err != nil {
+			a.ui.SetStatus(StateStopped, err.Error())
+		} else {
+			a.renderPlayer()
+		}
 	case ev.Rune() == 'a' || ev.Rune() == 'A':
 		a.openBrowser()
 	case ev.Rune() == 'h' || ev.Rune() == 'H':

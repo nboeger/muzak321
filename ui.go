@@ -334,6 +334,8 @@ func (u *UI) ShowHelp() {
 		"    M              Mute / Unmute",
 		"    P / N          Prev / Next track",
 		"    Up/Down        Volume",
+		"    Left/Right     Seek -5s / +5s (Shift: -30s / +30s)",
+		"    Home/End       Seek start / end of track",
 		"    A              Open file browser (add songs)",
 		"    H              This help",
 		"    Q              Quit",

@@ -25,6 +25,12 @@ func samplesToDuration(samples int, sr beep.SampleRate) time.Duration {
 	return time.Second * time.Duration(samples) / time.Duration(sr)
 }
 
+// Seek step sizes for the player view keybindings.
+const (
+	SeekStep      = 5 * time.Second
+	SeekStepLarge = 30 * time.Second
+)
+
 func decodeAudio(file *os.File, path string) (beep.StreamSeekCloser, beep.Format, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp3":
@@ -277,6 +283,44 @@ func (p *Player) Spectrum() []float64 {
 	p.spectrumPrev = out
 	p.mu.Unlock()
 	return out
+}
+
+// SeekTo seeks to an absolute position, clamped to [0, duration]. Returns an
+// error on live streams (curMP3Stream != nil) or when no decoder is open.
+func (p *Player) SeekTo(pos time.Duration) error {
+	p.mu.RLock()
+	streamer := p.streamer
+	live := p.curMP3Stream != nil
+	sr := p.sampleRate
+	p.mu.RUnlock()
+	if live {
+		return fmt.Errorf("seeking is not supported on live streams")
+	}
+	if streamer == nil || sr == 0 {
+		return fmt.Errorf("no track is loaded")
+	}
+	samples := sr.N(pos)
+	if samples < 0 {
+		samples = 0
+	}
+	if samples > streamer.Len() {
+		samples = streamer.Len()
+	}
+	if err := streamer.Seek(samples); err != nil {
+		return err
+	}
+	// Emit a UI refresh so the progress bar jumps immediately.
+	select {
+	case p.fileChanged <- p.CurrentFile():
+	default:
+	}
+	return nil
+}
+
+// SeekRelative seeks by ±delta (negative allowed), clamped.
+func (p *Player) SeekRelative(delta time.Duration) error {
+	pos, _ := p.Progress()
+	return p.SeekTo(pos + delta)
 }
 
 // StreamTitle returns the live ICY StreamTitle, or "" when not on a stream.
