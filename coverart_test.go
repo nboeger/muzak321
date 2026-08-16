@@ -43,8 +43,8 @@ func TestCoverArtBlockRender(t *testing.T) {
 		t.Errorf("glyph cells = %d, want %d", got, CoverArtWidth*CoverArtHeight)
 	}
 	// Cell (0,0): upper pixel = red (255,0,0), lower = blue (0,0,255).
-	if !strings.HasPrefix(s, "[#ff0000,#0000ff]▀[-]") {
-		t.Errorf("cell (0,0) = %q, want [#ff0000,#0000ff]▀[-]", s[:len("[#ff0000,#0000ff]▀[-]")])
+	if !strings.HasPrefix(s, "[#ff0000:#0000ff]▀[-]") {
+		t.Errorf("cell (0,0) = %q, want [#ff0000:#0000ff]▀[-]", s[:len("[#ff0000:#0000ff]▀[-]")])
 	}
 }
 

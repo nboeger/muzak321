@@ -46,7 +46,7 @@ func coverArtBlock(data []byte, width, height int) string {
 		for x := 0; x < width; x++ {
 			tr, tg, tb := pixel(x, y*2)   // upper pixel
 			br, bg, bb := pixel(x, y*2+1) // lower pixel
-			fmt.Fprintf(&sb, "[#%02x%02x%02x,#%02x%02x%02x]▀[-]",
+			fmt.Fprintf(&sb, "[#%02x%02x%02x:#%02x%02x%02x]▀[-]",
 				tr, tg, tb, br, bg, bb)
 		}
 		if y < height-1 {

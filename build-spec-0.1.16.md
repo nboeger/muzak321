@@ -241,7 +241,10 @@ func coverArtBlock(data []byte, width, height int) string
 - Decode with stdlib `image/jpeg` / `image/png` (sniff magic bytes).
 - Scale to `CoverArtWidth = 24` cells × `CoverArtHeight = 12` cells
   (= 48×24 pixels) with nearest-neighbor or box sampling.
-- Truecolor codes use tview dynamic-color syntax: `[#RRGGBB,#RRGGBB]▀[-]`.
+- Truecolor codes use tview dynamic-color syntax (v0.42+ uses
+  COLON-separated tags): `[#RRGGBB:#RRGGBB]▀[-]` — NOT the old
+  comma form `[fg,bg]`, which renders literally. Single-color tags
+  like `[#00ff00]` are fine.
 - Handle odd heights (pad last row with black).
 
 **UI (ui.go).** Restructure the player page into a column: the existing
