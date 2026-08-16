@@ -120,6 +120,9 @@ type Player struct {
 	coverData []byte
 	coverMIME string
 
+	lyrics     []LyricLine
+	lyricsPath string
+
 	tap          *sampleTap
 	bandEdges    []float64
 	spectrumPrev []float64
@@ -350,6 +353,23 @@ func readCoverArt(path string) ([]byte, string) {
 		return nil, ""
 	}
 	return pic.Data, pic.MIMEType
+}
+
+// Lyrics returns the current track's synced lyrics (empty when none).
+func (p *Player) Lyrics() []LyricLine {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.lyrics
+}
+
+// CurrentLyricIndex returns the index of the lyric active at the current
+// playback position, or -1 before the first line.
+func (p *Player) CurrentLyricIndex() int {
+	pos, _ := p.Progress()
+	p.mu.RLock()
+	lines := p.lyrics
+	p.mu.RUnlock()
+	return currentLyric(lines, pos)
 }
 
 // StreamTitle returns the live ICY StreamTitle, or "" when not on a stream.
@@ -629,8 +649,18 @@ func (p *Player) playCurrent() {
 	p.sampleRate = sr
 	if liveStream == nil {
 		p.coverData, p.coverMIME = readCoverArt(file)
+		lines, lerr := loadLRC(file)
+		if lerr == nil {
+			p.lyrics = lines
+			p.lyricsPath = file
+		} else {
+			p.lyrics = nil
+			p.lyricsPath = ""
+		}
 	} else {
 		p.coverData, p.coverMIME = nil, ""
+		p.lyrics = nil
+		p.lyricsPath = ""
 	}
 	p.mu.Unlock()
 

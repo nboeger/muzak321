@@ -48,6 +48,8 @@ type UI struct {
 
 	browserEntries []DirEntry
 	browserCur     int
+
+	lyricsView *tview.TextView
 }
 
 func newBar() *tview.TextView {
@@ -122,10 +124,15 @@ func NewUI() *UI {
 	u.help.SetDynamicColors(true)
 	u.help.SetBorder(true).SetTitle(" Help ")
 
+	// --- lyrics page ---
+	u.lyricsView = tview.NewTextView().SetDynamicColors(true)
+	u.lyricsView.SetBorder(true).SetTitle(" Lyrics ")
+
 	u.pages = tview.NewPages().
 		AddPage("player", playerPage, true, false).
 		AddPage("browser", browserPage, true, false).
-		AddPage("help", u.help, true, false)
+		AddPage("help", u.help, true, false).
+		AddPage("lyrics", u.lyricsView, true, false)
 
 	u.app.SetRoot(u.pages, true)
 	return u
@@ -347,6 +354,24 @@ func (u *UI) SetBrowserStatus(msg string) {
 	u.browserStatus.SetText(msg)
 }
 
+// SetLyrics renders the synced lyrics with the current line highlighted and
+// scrolled into view.
+func (u *UI) SetLyrics(lines []LyricLine, current int) {
+	var sb strings.Builder
+	for i, l := range lines {
+		ts := fmt.Sprintf("%02d:%02d", int(l.At.Minutes()), int(l.At.Seconds())%60)
+		if i == current {
+			fmt.Fprintf(&sb, "[lime]%s [::b]%s[::-]\n", ts, l.Text)
+		} else {
+			fmt.Fprintf(&sb, "[yellow]%s[-] %s\n", ts, l.Text)
+		}
+	}
+	u.lyricsView.SetText(sb.String())
+	if current >= 0 {
+		u.lyricsView.ScrollTo(0, current)
+	}
+}
+
 // --- help ---
 
 func (u *UI) ShowHelp() {
@@ -360,6 +385,7 @@ func (u *UI) ShowHelp() {
 		"    Up/Down        Volume",
 		"    Left/Right     Seek -5s / +5s (Shift: -30s / +30s)",
 		"    Home/End       Seek start / end of track",
+		"    L              Toggle synced lyrics (.lrc)",
 		"    A              Open file browser (add songs)",
 		"    H              This help",
 		"    Q              Quit",

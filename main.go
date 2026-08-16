@@ -202,6 +202,7 @@ func printHelp() {
 	fmt.Println("  Up/Down  Volume")
 	fmt.Println("  <-/->    Seek -5s / +5s (Shift: -30s / +30s)")
 	fmt.Println("  Home/End Seek start / end of track")
+	fmt.Println("  L        Toggle synced lyrics")
 	fmt.Println("  A        Add songs (opens file browser)")
 	fmt.Println("  Q        Quit")
 	fmt.Println()
@@ -238,11 +239,13 @@ func (a *App) pumpProgress() {
 	defer ticker.Stop()
 	for range ticker.C {
 		a.ui.Queue(func() {
-			if a.page != "player" {
-				return
+			switch a.page {
+			case "player":
+				pos, dur := a.player.Progress()
+				a.ui.SetProgress(pos, dur)
+			case "lyrics":
+				a.ui.SetLyrics(a.player.Lyrics(), a.player.CurrentLyricIndex())
 			}
-			pos, dur := a.player.Progress()
-			a.ui.SetProgress(pos, dur)
 		})
 	}
 }
@@ -296,6 +299,24 @@ func (a *App) streamName(url string) string {
 	return streamNameFromURL(url)
 }
 
+// toggleLyrics switches between the player and lyrics pages. With no .lrc file
+// for the current track it shows a notice and stays on the player page.
+func (a *App) toggleLyrics() {
+	if a.page == "lyrics" {
+		a.page = "player"
+		a.ui.ShowPage("player")
+		return
+	}
+	lines := a.player.Lyrics()
+	if len(lines) == 0 {
+		a.ui.SetStatus(a.player.State(), "No lyrics found for this track")
+		return
+	}
+	a.ui.SetLyrics(lines, a.player.CurrentLyricIndex())
+	a.page = "lyrics"
+	a.ui.ShowPage("lyrics")
+}
+
 func (a *App) showBrowser() {
 	a.page = "browser"
 	a.ui.ShowPage("browser")
@@ -315,6 +336,17 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		return a.playerKey(ev)
 	case "browser":
 		return a.browserKey(ev)
+	case "lyrics":
+		if ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' || ev.Rune() == 'Q' {
+			a.quit()
+			return nil
+		}
+		if ev.Key() == tcell.KeyEsc || ev.Rune() == 'l' || ev.Rune() == 'L' {
+			a.page = "player"
+			a.ui.ShowPage("player")
+			return nil
+		}
+		return nil
 	case "help":
 		if ev.Key() == tcell.KeyCtrlC {
 			a.quit()
@@ -382,6 +414,8 @@ func (a *App) playerKey(ev *tcell.EventKey) *tcell.EventKey {
 		} else {
 			a.renderPlayer()
 		}
+	case ev.Rune() == 'l' || ev.Rune() == 'L':
+		a.toggleLyrics()
 	case ev.Rune() == 'a' || ev.Rune() == 'A':
 		a.openBrowser()
 	case ev.Rune() == 'h' || ev.Rune() == 'H':
