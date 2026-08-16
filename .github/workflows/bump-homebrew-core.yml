@@ -22,8 +22,14 @@ jobs:
       - name: Checkout muzak321
         uses: actions/checkout@v4
 
+      - name: Check HOMEBREW_CORE_TOKEN
+        id: check-token
+        run: |
+          echo "has_token=${{ secrets.HOMEBREW_CORE_TOKEN != '' }}" >> "${GITHUB_OUTPUT}"
+
       - name: Compute source archive sha256
         id: sha
+        if: steps.check-token.outputs.has_token == 'true'
         run: |
           TAG="${GITHUB_REF_NAME}"
           URL="https://github.com/nboeger/muzak321/archive/refs/tags/${TAG}.tar.gz"
@@ -33,6 +39,7 @@ jobs:
           echo "url=${URL}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout homebrew-core fork
+        if: steps.check-token.outputs.has_token == 'true'
         uses: actions/checkout@v4
         with:
           repository: nboeger/homebrew-core
@@ -41,6 +48,7 @@ jobs:
           fetch-depth: 0
 
       - name: Update and push formula
+        if: steps.check-token.outputs.has_token == 'true'
         working-directory: homebrew-core
         env:
           TAG: ${{ steps.sha.outputs.tag }}
@@ -58,6 +66,7 @@ jobs:
           git push origin "muzak321-${TAG}"
 
       - name: Open pull request
+        if: steps.check-token.outputs.has_token == 'true'
         working-directory: homebrew-core
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_CORE_TOKEN }}
