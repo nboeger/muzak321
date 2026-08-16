@@ -9,7 +9,13 @@
 > **Baseline:** repo `nboeger/muzak321`, tag `0.1.15` — `go build` + `go test ./...`
 > green. Do not regress: **every phase must end with build + tests green.**
 >
-> **Build command (no local Go on the dev box; use docker):**
+> **Build command (local Go via gvm — Go 1.25.0 at `$HOME/.gvm/go/bin/go`;**
+> **requires gcc + libasound2-dev for the CGO/ALSA path):**
+> ```bash
+> export PATH="$HOME/.gvm/go/bin:$PATH"
+> go vet ./... && go build -o /dev/null . && go test ./...
+> ```
+> Docker fallback if Go is unavailable:
 > ```bash
 > docker run --rm -v "$(pwd):/work" -w /work golang:1.25-bookworm \
 >   sh -c "apt-get update -qq && apt-get install -y -qq gcc libasound2-dev >/dev/null && \
