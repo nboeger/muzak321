@@ -50,6 +50,8 @@ type UI struct {
 	browserCur     int
 
 	lyricsView *tview.TextView
+
+	historyList *tview.List
 }
 
 func newBar() *tview.TextView {
@@ -128,11 +130,19 @@ func NewUI() *UI {
 	u.lyricsView = tview.NewTextView().SetDynamicColors(true)
 	u.lyricsView.SetBorder(true).SetTitle(" Lyrics ")
 
+	// --- history page ---
+	u.historyList = tview.NewList()
+	u.historyList.SetBorder(true).SetTitle(" Recently Played ")
+	u.historyList.ShowSecondaryText(true)
+	u.historyList.SetHighlightFullLine(true)
+	u.historyList.SetWrapAround(true)
+
 	u.pages = tview.NewPages().
 		AddPage("player", playerPage, true, false).
 		AddPage("browser", browserPage, true, false).
 		AddPage("help", u.help, true, false).
-		AddPage("lyrics", u.lyricsView, true, false)
+		AddPage("lyrics", u.lyricsView, true, false).
+		AddPage("history", u.historyList, true, false)
 
 	u.app.SetRoot(u.pages, true)
 	return u
@@ -372,6 +382,18 @@ func (u *UI) SetLyrics(lines []LyricLine, current int) {
 	}
 }
 
+// SetHistory fills the recently-played list (most recent first).
+func (u *UI) SetHistory(entries [][]string) {
+	u.historyList.Clear()
+	if len(entries) == 0 {
+		u.historyList.AddItem("[yellow](no recently played tracks)[-]", "", 0, nil)
+		return
+	}
+	for _, e := range entries {
+		u.historyList.AddItem(cleanFileName(e[1]), formatHistoryTime(e[0])+"  "+e[1], 0, nil)
+	}
+}
+
 // --- help ---
 
 func (u *UI) ShowHelp() {
@@ -386,6 +408,8 @@ func (u *UI) ShowHelp() {
 		"    Left/Right     Seek -5s / +5s (Shift: -30s / +30s)",
 		"    Home/End       Seek start / end of track",
 		"    L              Toggle synced lyrics (.lrc)",
+		"    S              Save queue (last.m3u) / Shift+S reload + play",
+		"    Y              Recently played history",
 		"    A              Open file browser (add songs)",
 		"    H              This help",
 		"    Q              Quit",

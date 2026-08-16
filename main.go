@@ -203,6 +203,8 @@ func printHelp() {
 	fmt.Println("  <-/->    Seek -5s / +5s (Shift: -30s / +30s)")
 	fmt.Println("  Home/End Seek start / end of track")
 	fmt.Println("  L        Toggle synced lyrics")
+	fmt.Println("  S        Save queue to last.m3u / reload + play it")
+	fmt.Println("  Y        Recently played history")
 	fmt.Println("  A        Add songs (opens file browser)")
 	fmt.Println("  Q        Quit")
 	fmt.Println()
@@ -323,6 +325,64 @@ func (a *App) showBrowser() {
 	a.refreshBrowser()
 }
 
+// playFiles replaces the queue and starts playback immediately, whether the
+// player is mid-track or stopped.
+func (a *App) playFiles(files []string) {
+	a.player.SetFiles(files, a.shuffle)
+	if a.player.running() {
+		a.player.startNext()
+	} else {
+		a.player.Start()
+		a.player.PlayCurrent()
+	}
+}
+
+// savePlaylist writes the current queue to ~/.muzak321/last.m3u.
+func (a *App) savePlaylist() {
+	dir, err := ensureDataDir()
+	if err != nil {
+		a.ui.SetStatus(StateStopped, err.Error())
+		return
+	}
+	files := a.player.Files()
+	if err := SavePlaylist(filepath.Join(dir, playlistFile), files); err != nil {
+		a.ui.SetStatus(StateStopped, err.Error())
+		return
+	}
+	a.ui.SetStatus(a.player.State(), fmt.Sprintf("Saved %d tracks", len(files)))
+}
+
+// loadPlaylist reloads last.m3u and plays it, respecting the shuffle flag.
+func (a *App) loadPlaylist() {
+	files, err := parseM3U(filepath.Join(dataDir(), playlistFile))
+	if err != nil {
+		a.ui.SetStatus(StateStopped, "No saved playlist")
+		return
+	}
+	a.playFiles(files)
+	a.showPlayer()
+}
+
+// showHistory opens the recently-played page.
+func (a *App) showHistory() {
+	a.ui.SetHistory(LoadHistory())
+	a.page = "history"
+	a.ui.ShowPage("history")
+}
+
+// historyEnter plays the selected history entry.
+func (a *App) historyEnter() {
+	entries := LoadHistory()
+	cur := a.ui.historyList.GetCurrentItem()
+	if cur < 0 || cur >= len(entries) {
+		return
+	}
+	a.playFiles([]string{entries[cur][1]})
+	a.page = "player"
+	a.ui.ShowPage("player")
+	a.renderPlayer()
+}
+
 func (a *App) refreshBrowser() {
 	entries := a.browser.Entries()
 	a.ui.SetBrowser(a.browser.Dir(), entries, 0)
@@ -336,6 +396,24 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		return a.playerKey(ev)
 	case "browser":
 		return a.browserKey(ev)
+	case "history":
+		if ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' || ev.Rune() == 'Q' {
+			a.quit()
+			return nil
+		}
+		if ev.Key() == tcell.KeyEsc || ev.Rune() == 'y' || ev.Rune() == 'Y' {
+			a.page = "player"
+			a.ui.ShowPage("player")
+			return nil
+		}
+		if ev.Key() == tcell.KeyEnter {
+			a.historyEnter()
+			return nil
+		}
+		if ev.Key() == tcell.KeyUp || ev.Key() == tcell.KeyDown {
+			return ev // let the list handle movement
+		}
+		return nil
 	case "lyrics":
 		if ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' || ev.Rune() == 'Q' {
 			a.quit()

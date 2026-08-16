@@ -128,6 +128,7 @@ type Player struct {
 	spectrumPrev []float64
 
 	stopCh      chan struct{}
+	started     bool
 	fileChanged chan string
 	stateChan   chan PlayerState
 	playNext    chan struct{}
@@ -481,6 +482,11 @@ func (p *Player) AppendFiles(files []string) {
 
 func (p *Player) Start() {
 	p.mu.Lock()
+	if p.started {
+		p.mu.Unlock()
+		return
+	}
+	p.started = true
 	p.stopCh = make(chan struct{})
 	p.mu.Unlock()
 	go p.playbackLoop()
@@ -491,6 +497,10 @@ func (p *Player) Stop() {
 		p.ctrl.Paused = false
 	}
 	p.closeDecoderLocked()
+
+	p.mu.Lock()
+	p.started = false
+	p.mu.Unlock()
 
 	select {
 	case <-p.stopCh:
@@ -657,6 +667,16 @@ func (p *Player) playCurrent() {
 			p.lyrics = nil
 			p.lyricsPath = ""
 		}
+		// Recently-played history: fire-and-forget, errors surface in the
+		// status bar only. Stream URLs are never recorded.
+		go func() {
+			if err := AppendHistory(file); err != nil {
+				p.mu.Lock()
+				p.errorMsg = "history: " + err.Error()
+				p.mu.Unlock()
+				p.sendState(p.State())
+			}
+		}()
 	} else {
 		p.coverData, p.coverMIME = nil, ""
 		p.lyrics = nil
@@ -786,4 +806,11 @@ func (p *Player) PlayCurrent() {
 	case p.playNext <- struct{}{}:
 	default:
 	}
+}
+
+// running reports whether the playback loop is active.
+func (p *Player) running() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.started
 }
