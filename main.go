@@ -127,6 +127,8 @@ func main() {
 	a.ui = NewUI()
 	a.ui.app.SetInputCapture(a.handleKey)
 
+	go startMPRIS(player)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {

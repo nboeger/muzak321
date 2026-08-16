@@ -6,6 +6,7 @@ require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/faiface/beep v1.1.0
 	github.com/gdamore/tcell/v2 v2.8.1
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/rivo/tview v0.42.0
 )
