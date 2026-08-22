@@ -1,6 +1,6 @@
 name: muzak321
 base: core22
-version: 0.1.15
+version: 0.1.16
 summary: A command-line music player
 title: muzak321 — Music Player
 description: |
@@ -43,7 +43,7 @@ parts:
       - -usr/share/lintian
     override-build: |
       set -eux
-      # Version comes from the git tag (matches the snap 'version: 0.1.15'
+      # Version comes from the git tag (matches the snap 'version: 0.1.16'
       # label) so a release can never ship with a stale version string.
       VERSION=$(git describe --tags --always 2>/dev/null | tr -d '\n')
       [ -n "$VERSION" ] || VERSION="0.0.0"
