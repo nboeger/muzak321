@@ -29,7 +29,7 @@ func notify(title, artist, file string) {
 	if err != nil {
 		return
 	}
-	args := append([]string{"-a", "muzak321"}, notifyArgs(title, artist, file)...)
+	args := append([]string{"-a", "muzak321", "-t", "5000", "-u", "low"}, notifyArgs(title, artist, file)...)
 	go func() {
 		exec.Command(path, args...).Start() // error intentionally ignored
 	}()

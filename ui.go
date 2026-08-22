@@ -78,13 +78,20 @@ func NewUI() *UI {
 	u.spectrum = tview.NewTextView().SetDynamicColors(true)
 	u.spectrum.SetBackgroundColor(tcell.ColorBlack)
 
+	u.coverArt = tview.NewTextView().SetDynamicColors(true)
+	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
+
+	eqRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(u.spectrum, 0, 1, false).
+		AddItem(u.coverArt, CoverArtWidth, 0, false)
+
 	u.playlist = tview.NewList()
-	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 	u.playlist.ShowSecondaryText(false)
 	u.playlist.SetHighlightFullLine(true)
 	u.playlist.SetWrapAround(false)
 	u.playlist.SetSelectedStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorBlack).Background(tcell.ColorLime))
+	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 
 	u.statusLeft = newBar()
 	u.statusRight = newBar()
@@ -94,16 +101,9 @@ func NewUI() *UI {
 
 	playerPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 1, 0, false).
-		AddItem(u.progress, 1, 0, false).
-		AddItem(u.spectrum, 3, 0, false).
+		AddItem(eqRow, 8, 0, false).
 		AddItem(u.playlist, 0, 1, false).
 		AddItem(status, 1, 0, false)
-
-	u.coverArt = tview.NewTextView().SetDynamicColors(true)
-	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
-	playerPage = tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(playerPage, 0, 1, false).
-		AddItem(u.coverArt, CoverArtWidth, 0, false)
 
 	// --- browser page ---
 	u.browserHeader = newBar()
@@ -217,56 +217,42 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 		colReset, "[yellow]", timeStr) + colReset)
 }
 
-const spectrumGlyphs = "▁▂▃▄▅▆▇█"
+// SetSpectrum renders the spectrum as vertical pixelated bars — one column
+// per band, 8 rows tall. Filled cells are colored blocks; empty cells are
+// spaces. active=false shows dim dots.
+const spectrumRows = 8
 
-var spectrumGlyphRunes = []rune(spectrumGlyphs)
-
-// SetSpectrum renders the spectrum frame as 3 rows of block glyphs, one
-// column per band (24 levels total per band). active=false renders a dimmed
-// flat baseline; empty values (stopped) clear the view.
 func (u *UI) SetSpectrum(values []float64, active bool) {
 	if len(values) == 0 {
 		u.spectrum.SetText("")
 		return
 	}
 	var sb strings.Builder
-	for row := 0; row < 3; row++ {
-		for _, v := range values {
+	for row := 0; row < spectrumRows; row++ {
+		for i, v := range values {
+			if i > 0 {
+				sb.WriteByte(' ')
+			}
 			if !active {
-				// Dimmed flat baseline: one dim block per column, bottom row.
-				if row == 2 {
-					sb.WriteString("[#444444]▁[-]")
-				} else {
-					sb.WriteString(" ")
-				}
+				sb.WriteString("[dim]·[-]")
 				continue
 			}
-			level := int(v * 24)
-			if level > 24 {
-				level = 24
+			level := int(v * float64(spectrumRows))
+			if row >= spectrumRows-level {
+				fmt.Fprintf(&sb, "[#%s]●[-]", spectrumColor(v))
+			} else {
+				sb.WriteString(" ")
 			}
-			cells := level - (2-row)*8 // cells filled in this row, bottom-up
-			if cells < 0 {
-				cells = 0
-			}
-			if cells > 8 {
-				cells = 8
-			}
-			glyph := " "
-			if cells > 0 {
-				glyph = string(spectrumGlyphRunes[cells-1])
-			}
-			fmt.Fprintf(&sb, "[#%s]%s[-]", spectrumColor(v), glyph)
 		}
-		if row < 2 {
+		if row < spectrumRows-1 {
 			sb.WriteByte('\n')
 		}
 	}
 	u.spectrum.SetText(sb.String())
 }
 
-// SetCoverArt renders the current file's embedded art; empty input clears the
-// pane. The rendered string is cached so it is not re-rendered on every tick.
+// SetCoverArt renders the current file's embedded art inside the playlist
+// box. The rendered string is cached so it is not re-rendered on every tick.
 func (u *UI) SetCoverArt(data []byte, mime string) {
 	if bytes.Equal(data, u.lastCover) {
 		return
