@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/BourgeoisBear/rasterm v1.1.2 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/hajimehoshi/oto v0.7.1 // indirect
 	github.com/icza/bitio v1.0.0 // indirect
