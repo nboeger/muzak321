@@ -1,4 +1,4 @@
-VERSION ?= dev
+VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo dev)
 
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
