@@ -10,7 +10,7 @@ import (
 // Spectrum constants.
 const (
 	SpectrumWindow    = 4096    // FFT window: ~93 ms at 44.1 kHz
-	SpectrumBands     = 14      // log-spaced output bands
+	SpectrumBands     = 28      // log-spaced output bands (wider)
 	SpectrumBandMinHz = 40.0    // lowest band edge
 	SpectrumBandMaxHz = 16000.0 // highest band edge
 	SpectrumAttack    = 0.6     // blend toward rising values

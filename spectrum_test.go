@@ -34,8 +34,8 @@ func TestSpectrumBandsTonePosition(t *testing.T) {
 		freq float64
 		want int
 	}{
-		{440, 5},
-		{1000, 7},
+		{440, 10}, // 440 Hz should be around band 10 (was 5 with 14 bands)
+		{1000, 15}, // 1000 Hz should be around band 15 (was 7 with 14 bands)
 	}
 	for _, tt := range tests {
 		bands := spectrumBands(sineSamples(sr, tt.freq, SpectrumWindow), edges, sr)
@@ -134,39 +134,51 @@ func TestSpectrumSmoothing(t *testing.T) {
 	}
 }
 
-// TestSetSpectrumRender — 14 columns × 3 rows of block glyphs with truecolor
-// codes when active; dimmed baseline when paused; clears when stopped.
+// TestSetSpectrumRender — 28 columns of Braille 12-row-tall bars with
+// truecolor codes when active; dimmed baseline when paused; clears when stopped.
 func TestSetSpectrumRender(t *testing.T) {
 	u := NewUI()
-	vals := make([]float64, 14)
+	vals := make([]float64, SpectrumBands)
 	for i := range vals {
 		vals[i] = 1.0
 	}
 	u.SetSpectrum(vals, true)
 	text := u.spectrum.GetText(false)
-	if !strings.Contains(text, "█") {
-		t.Errorf("active render missing block glyphs: %q", text)
+	if !strings.Contains(text, "⣿") {
+		t.Errorf("v=1.0 should render full braille (⣿), got %q", text)
 	}
 	if !strings.Contains(text, "#") {
 		t.Errorf("active render missing truecolor codes: %q", text)
 	}
-	if strings.Count(text, "\n") != 2 {
-		t.Errorf("want 3 rows, got %q", text)
+	if strings.Count(text, "\n") != 7 {
+		t.Errorf("want 8 rows, got %d newlines", strings.Count(text, "\n"))
 	}
 
-	// Mid-level value: bottom row full, middle row partial (▄).
-	half := make([]float64, 14)
+	// Mid-level value (0.5): some rows full, some empty, some partial.
+	half := make([]float64, SpectrumBands)
 	for i := range half {
 		half[i] = 0.5
 	}
 	u.SetSpectrum(half, true)
-	if !strings.Contains(u.spectrum.GetText(false), "▄") {
-		t.Errorf("0.5 value should render a partial block (▄)")
+	text = u.spectrum.GetText(false)
+	if !strings.Contains(text, "⠐") {
+		t.Errorf("0.5 renders partial bars (bottom rows full, top empty), got %q", text)
+	}
+
+	// Very low value (0.05): mostly empty, no full cells.
+	low := make([]float64, SpectrumBands)
+	for i := range low {
+		low[i] = 0.05
+	}
+	u.SetSpectrum(low, true)
+	text = u.spectrum.GetText(false)
+	if strings.Contains(text, "⠿") {
+		t.Errorf("0.05 should not render full braille, got %q", text)
 	}
 
 	u.SetSpectrum(vals, false)
 	text = u.spectrum.GetText(false)
-	if strings.Contains(text, "█") {
+	if strings.Contains(text, "⠿") {
 		t.Errorf("inactive render should be dimmed, got %q", text)
 	}
 

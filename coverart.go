@@ -9,12 +9,6 @@ import (
 	"strings"
 )
 
-// Cover art rendering constants (half-block cells).
-const (
-	CoverArtWidth  = 24 // cells
-	CoverArtHeight = 12 // cells (= 48x24 pixels)
-)
-
 // coverArtBlock renders image data as width×height half-block ANSI truecolor
 // rows. Each output cell is one "▀" glyph: foreground = upper pixel,
 // background = lower pixel, using tview dynamic-color syntax. Returns "" on

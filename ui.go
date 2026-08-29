@@ -11,18 +11,22 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Color scheme (kept from the ncurses version):
+// Color scheme: darker/paler, like btop defaults.
 //
-//	header/status bars:  black text on magenta (ncurses pair 2)
-//	cursor/reverse:      black on white        (pair 3)
-//	secondary/hints:     yellow                (pair 4)
-//	playing / progress:  green                 (pair 5 / 9)
-//	directories:         cyan                  (pair 7)
-//	errors:              red                   (pair 8)
+//	header/status bars:  dark slate gray bg, pale foreground
+//	playing / progress:  cyan
+//	directories:         cyan
+//	errors:              red
+//	secondary/hints:    yellowish
 const (
-	colHeader  = tcell.ColorFuchsia
-	colBarFill = "[black:lime]"
+	colHeader  = tcell.ColorDarkSlateGray
+	colBarFill = "[black:cyan]"
 	colReset   = "[-:-]"
+)
+
+const (
+	CoverArtWidth  = 24
+	CoverArtHeight = 12
 )
 
 type UI struct {
@@ -57,7 +61,7 @@ type UI struct {
 func newBar() *tview.TextView {
 	b := tview.NewTextView()
 	b.SetBackgroundColor(colHeader)
-	b.SetTextColor(tcell.ColorBlack)
+	b.SetTextColor(tcell.ColorWhite) // pale text on dark header (btop style)
 	return b
 }
 
@@ -87,10 +91,11 @@ func NewUI() *UI {
 
 	u.playlist = tview.NewList()
 	u.playlist.ShowSecondaryText(false)
-	u.playlist.SetHighlightFullLine(true)
+	u.playlist.SetHighlightFullLine(false)
 	u.playlist.SetWrapAround(false)
 	u.playlist.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorBlack).Background(tcell.ColorLime))
+		Foreground(tcell.ColorWhite).Background(tcell.ColorBlack).
+		Bold(true).Underline(true))
 	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 
 	u.statusLeft = newBar()
@@ -101,7 +106,7 @@ func NewUI() *UI {
 
 	playerPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 1, 0, false).
-		AddItem(eqRow, 8, 0, false).
+		AddItem(eqRow, 12, 0, false).
 		AddItem(u.playlist, 0, 1, false).
 		AddItem(status, 1, 0, false)
 
@@ -217,34 +222,83 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 		colReset, "[yellow]", timeStr) + colReset)
 }
 
-// SetSpectrum renders the spectrum as vertical pixelated bars — one column
-// per band, 8 rows tall. Filled cells are colored blocks; empty cells are
-// spaces. active=false shows dim dots.
-const spectrumRows = 8
+// SetSpectrum renders the spectrum as 28 vertical bars made of stacked
+// Braille 2x4-pixel cells (U+2800–U+28FF, btop-style). Each cell shows
+// how full the bar is at that row (bottom-up: empty → top-only → full).
+const spectrumRows = 12
+
+// 8 Braille patterns for the bottom half (dots accumulating from bottom).
+// 0 = empty, 7 = full. We rotate 90°: each represents one row's worth of
+// 2x4 pixel cells, with dots at the bottom.
+var brailleLevels = [8]rune{
+	'⠀', // 0 dots
+	'⢀', // 1 dot (bottom-left)
+	'⡀', // 2 dots
+	'⣀', // 3 dots
+	'⣤', // 4 dots
+	'⣦', // 5 dots
+	'⣴', // 6 dots
+	'⣿', // 8 dots (full)
+}
 
 func (u *UI) SetSpectrum(values []float64, active bool) {
 	if len(values) == 0 {
 		u.spectrum.SetText("")
 		return
 	}
+	// height = (rows-1) for the fully-filled portion, leaving the topmost
+	// row for the partial "peak" cell. Per band:
+	//   - rows filled = floor(v * rows)
+	//   - peak level  = round((v * rows - floor) * len(levels))
+	rows := spectrumRows
+	levelMax := len(brailleLevels) - 1
+
 	var sb strings.Builder
-	for row := 0; row < spectrumRows; row++ {
+	for row := 0; row < rows; row++ {
+		// For the topmost row, allow level to be 0 too; for rows below the
+		// topmost, the cell is always full braille (if active).
+		rowFromTop := row
 		for i, v := range values {
-			if i > 0 {
-				sb.WriteByte(' ')
-			}
 			if !active {
-				sb.WriteString("[dim]·[-]")
+				fmt.Fprintf(&sb, "[dim]·[-]")
+				if i < len(values)-1 {
+					sb.WriteByte(' ')
+				}
 				continue
 			}
-			level := int(v * float64(spectrumRows))
-			if row >= spectrumRows-level {
-				fmt.Fprintf(&sb, "[#%s]●[-]", spectrumColor(v))
+			filledRows := int(v * float64(rows))
+			var cell rune
+			if rowFromTop < rows-filledRows {
+				// above the bar — empty (space)
+				cell = ' '
+			} else if rowFromTop < rows-filledRows-1 {
+				// fully below the peak — full
+				cell = brailleLevels[levelMax]
+			} else if rowFromTop == rows-filledRows-1 {
+				// peak row — partial based on fractional v
+				frac := v*float64(rows) - float64(filledRows)
+				idx := int(frac*float64(levelMax) + 0.5)
+				if idx < 0 {
+					idx = 0
+				}
+				if idx > levelMax {
+					idx = levelMax
+				}
+				cell = brailleLevels[idx]
 			} else {
+				// full bar
+				cell = brailleLevels[levelMax]
+			}
+			if cell == ' ' {
 				sb.WriteString(" ")
+			} else {
+				fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(v), cell)
+			}
+			if i < len(values)-1 {
+				sb.WriteByte(' ')
 			}
 		}
-		if row < spectrumRows-1 {
+		if row < rows-1 {
 			sb.WriteByte('\n')
 		}
 	}
