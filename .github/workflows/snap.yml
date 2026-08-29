@@ -33,6 +33,10 @@ jobs:
       - name: Verify snap version matches tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
+          echo "GITHUB_REF=${{ github.ref }}"
+          echo "GITHUB_REF_NAME=${{ github.ref_name }}"
+          echo "GITHUB_SHA=${{ github.sha }}"
+          echo "GITHUB_WORKFLOW_REF=${{ github.workflow_ref }}"
           TAG="${GITHUB_REF_NAME#v}"
           TAG="$(echo "$TAG" | xargs)"
           YAML_VER="$(awk '/^version:/{print $2}' snap/snapcraft.yaml | head -1)"
