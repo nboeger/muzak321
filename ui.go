@@ -25,8 +25,8 @@ const (
 )
 
 const (
-	CoverArtWidth  = 24
-	CoverArtHeight = 12
+	CoverArtWidth  = 28
+	CoverArtHeight = 14
 )
 
 type UI struct {
@@ -74,7 +74,7 @@ func NewUI() *UI {
 	u.headerRight.SetTextAlign(tview.AlignRight)
 	header := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(u.headerLeft, 0, 1, false).
-		AddItem(u.headerRight, 22, 0, false)
+		AddItem(u.headerRight, 1, 0, false)
 
 	u.progress = tview.NewTextView().SetDynamicColors(true)
 	u.progress.SetBackgroundColor(tcell.ColorBlack)
@@ -85,9 +85,11 @@ func NewUI() *UI {
 	u.coverArt = tview.NewTextView().SetDynamicColors(true)
 	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
 
-	eqRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(u.spectrum, 0, 1, false).
-		AddItem(u.coverArt, CoverArtWidth, 0, false)
+	// right column: cover art (14 rows) + equalizer (6 rows visible,
+	// full 12-row Braille bar fits and overflows slightly for visibility).
+	rightCol := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(u.coverArt, CoverArtHeight, 0, false).
+		AddItem(u.spectrum, 8, 0, false)
 
 	u.playlist = tview.NewList()
 	u.playlist.ShowSecondaryText(false)
@@ -95,8 +97,7 @@ func NewUI() *UI {
 	u.playlist.SetWrapAround(false)
 	u.playlist.SetSelectedStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorWhite).Background(tcell.ColorBlack).
-		Bold(true).Underline(true))
-	u.playlist.SetBorder(true).SetTitle(" Playlist ")
+		Bold(true))
 
 	u.statusLeft = newBar()
 	u.statusRight = newBar()
@@ -104,10 +105,14 @@ func NewUI() *UI {
 		AddItem(u.statusLeft, 10, 0, false).
 		AddItem(u.statusRight, 0, 1, false)
 
+	// Main body: playlist (left) | right column (art + spectrum).
+	body := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(u.playlist, 0, 1, false).
+		AddItem(rightCol, CoverArtWidth, 0, false)
+
 	playerPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 1, 0, false).
-		AddItem(eqRow, 12, 0, false).
-		AddItem(u.playlist, 0, 1, false).
+		AddItem(body, 0, 1, false).
 		AddItem(status, 1, 0, false)
 
 	// --- browser page ---
@@ -222,23 +227,23 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 		colReset, "[yellow]", timeStr) + colReset)
 }
 
-// SetSpectrum renders the spectrum as 28 vertical bars made of stacked
-// Braille 2x4-pixel cells (U+2800–U+28FF, btop-style). Each cell shows
-// how full the bar is at that row (bottom-up: empty → top-only → full).
-const spectrumRows = 12
+// SetSpectrum renders the spectrum as horizontal bars extending leftward
+// from the right edge. Each of the visible bands gets one row; bar length
+// represents magnitude. Uses Braille 2x4 cells filled right-to-left.
+const spectrumRows = 12  // bands shown (reduced from 28 for horizontal layout)
 
-// 8 Braille patterns for the bottom half (dots accumulating from bottom).
-// 0 = empty, 7 = full. We rotate 90°: each represents one row's worth of
-// 2x4 pixel cells, with dots at the bottom.
-var brailleLevels = [8]rune{
-	'⠀', // 0 dots
-	'⢀', // 1 dot (bottom-left)
-	'⡀', // 2 dots
-	'⣀', // 3 dots
-	'⣤', // 4 dots
-	'⣦', // 5 dots
-	'⣴', // 6 dots
-	'⣿', // 8 dots (full)
+// 9 Braille patterns for horizontal fill within a cell (right column first,
+// then left column). Each cell is 2 dots wide; we use 4 levels per cell.
+var horizBraille = [9]rune{
+	'⠀', // 0: empty
+	'⠈', // 1: dot 4 (top-right)
+	'⠘', // 2: dots 4,5 (right column top two)
+	'⠸', // 3: dots 4,5,6 (right column)
+	'⠼', // 4: dots 4,5,6,8 (full right column)
+	'⠿', // 5: full right + dot 1 (left col top)
+	'⠿', // 6: full right + dots 1,2
+	'⠿', // 7: full right + dots 1,2,3
+	'⠿', // 8: full (all 8 dots)
 }
 
 func (u *UI) SetSpectrum(values []float64, active bool) {
@@ -246,56 +251,77 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		u.spectrum.SetText("")
 		return
 	}
-	// height = (rows-1) for the fully-filled portion, leaving the topmost
-	// row for the partial "peak" cell. Per band:
-	//   - rows filled = floor(v * rows)
-	//   - peak level  = round((v * rows - floor) * len(levels))
+
+	// Downsample 28 bands → spectrumRows (12) by taking max in each group.
+	bandPerRow := len(values) / spectrumRows
+	if bandPerRow < 1 {
+		bandPerRow = 1
+	}
 	rows := spectrumRows
-	levelMax := len(brailleLevels) - 1
+	levelMax := len(horizBraille) - 1
+
+	// Target horizontal cells per row = actual widget width. Each Braille
+	// cell = 1 terminal column, so the bar fills the full spectrum column
+	// (no trailing gap on the right regardless of terminal size).
+	_, _, w, _ := u.spectrum.GetInnerRect()
+	horizCells := w
+	if horizCells < 4 {
+		horizCells = 4
+	}
 
 	var sb strings.Builder
 	for row := 0; row < rows; row++ {
-		// For the topmost row, allow level to be 0 too; for rows below the
-		// topmost, the cell is always full braille (if active).
-		rowFromTop := row
-		for i, v := range values {
-			if !active {
-				fmt.Fprintf(&sb, "[dim]·[-]")
-				if i < len(values)-1 {
-					sb.WriteByte(' ')
-				}
-				continue
+		// Aggregate bands for this row
+		start := row * bandPerRow
+		end := start + bandPerRow
+		if end > len(values) {
+			end = len(values)
+		}
+		var maxV float64
+		for i := start; i < end; i++ {
+			if values[i] > maxV {
+				maxV = values[i]
 			}
-			filledRows := int(v * float64(rows))
-			var cell rune
-			if rowFromTop < rows-filledRows {
-				// above the bar — empty (space)
-				cell = ' '
-			} else if rowFromTop < rows-filledRows-1 {
-				// fully below the peak — full
-				cell = brailleLevels[levelMax]
-			} else if rowFromTop == rows-filledRows-1 {
-				// peak row — partial based on fractional v
-				frac := v*float64(rows) - float64(filledRows)
-				idx := int(frac*float64(levelMax) + 0.5)
-				if idx < 0 {
-					idx = 0
-				}
-				if idx > levelMax {
-					idx = levelMax
-				}
-				cell = brailleLevels[idx]
-			} else {
-				// full bar
-				cell = brailleLevels[levelMax]
+		}
+
+		if !active {
+			// Dimmed: just dots
+			for c := 0; c < horizCells; c++ {
+				sb.WriteString("[dim]·[-]")
 			}
-			if cell == ' ' {
-				sb.WriteString(" ")
-			} else {
-				fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(v), cell)
+		} else {
+			// Horizontal bar: filled cells from right, partial cell at boundary.
+			filledCells := int(maxV * float64(horizCells))
+			if filledCells > horizCells {
+				filledCells = horizCells
 			}
-			if i < len(values)-1 {
-				sb.WriteByte(' ')
+			frac := maxV*float64(horizCells) - float64(filledCells)
+			partialIdx := int(frac * float64(levelMax) + 0.5)
+			if partialIdx > levelMax {
+				partialIdx = levelMax
+			}
+
+			// Render left-to-right: empty cells, then partial, then full cells.
+			// But bar grows from RIGHT, so we render: [empty][partial][full...]
+			// Actually we want: left side empty, right side filled.
+			for c := 0; c < horizCells; c++ {
+				var cell rune
+				posFromRight := horizCells - c
+				if posFromRight > filledCells {
+					// left of the bar - empty
+					cell = ' '
+				} else if posFromRight == filledCells {
+					// boundary cell - partial
+					cell = horizBraille[partialIdx]
+				} else {
+					// inside bar - full
+					cell = horizBraille[levelMax]
+				}
+				if cell == ' ' {
+					sb.WriteString(" ")
+				} else {
+					fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(maxV), cell)
+				}
 			}
 		}
 		if row < rows-1 {
@@ -328,7 +354,7 @@ func (u *UI) SetPlaylist(files []string, current int) {
 	for i, f := range files {
 		name := cleanFileName(f)
 		if i == current {
-			u.playlist.AddItem(fmt.Sprintf("%s > %s <%s", colBarFill, name, colReset), "", 0, nil)
+			u.playlist.AddItem(fmt.Sprintf("[::b]%d. * %s[::-]", i+1, name), "", 0, nil)
 		} else {
 			u.playlist.AddItem(fmt.Sprintf("[yellow]%2d[-] %s", i+1, name), "", 0, nil)
 		}

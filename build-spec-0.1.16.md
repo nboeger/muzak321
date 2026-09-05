@@ -239,7 +239,7 @@ func coverArtBlock(data []byte, width, height int) string
 ```
 
 - Decode with stdlib `image/jpeg` / `image/png` (sniff magic bytes).
-- Scale to `CoverArtWidth = 24` cells × `CoverArtHeight = 12` cells
+- Scale to `CoverArtWidth = 36` cells × `CoverArtHeight = 18` cells
   (= 48×24 pixels) with nearest-neighbor or box sampling.
 - Truecolor codes use tview dynamic-color syntax (v0.42+ uses
   COLON-separated tags): `[#RRGGBB:#RRGGBB]▀[-]` — NOT the old

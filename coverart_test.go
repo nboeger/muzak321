@@ -9,10 +9,10 @@ import (
 	"testing"
 )
 
-// testPNG builds a 48x24 PNG with a distinct top-left and bottom-left pixel.
+// testPNG builds a 72x36 PNG with a distinct top-left and bottom-left pixel.
 func testPNG(t *testing.T) []byte {
 	t.Helper()
-	const w, h = 48, 24
+	const w, h = 72, 36
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -29,7 +29,7 @@ func testPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// TestCoverArtBlockRender — a generated 48x24 PNG renders to a 24x12 string of
+// TestCoverArtBlockRender — a generated 48x24 PNG renders to a 36x18 string of
 // ▀ cells with truecolor codes; each cell's fg/bg match the sampled pixels.
 func TestCoverArtBlockRender(t *testing.T) {
 	s := coverArtBlock(testPNG(t), CoverArtWidth, CoverArtHeight)
@@ -50,7 +50,7 @@ func TestCoverArtBlockRender(t *testing.T) {
 
 // TestCoverArtBlockGarbage — garbage bytes → empty string, no panic.
 func TestCoverArtBlockGarbage(t *testing.T) {
-	if s := coverArtBlock([]byte("not an image at all"), 24, 12); s != "" {
+	if s := coverArtBlock([]byte("not an image at all"), CoverArtWidth, CoverArtHeight); s != "" {
 		t.Errorf("garbage bytes rendered %q, want empty", s)
 	}
 }

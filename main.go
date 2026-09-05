@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"regexp"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -14,7 +16,40 @@ import (
 )
 
 // version is overridden at build time via -ldflags "-X main.version=<ver>".
-var version = "dev"
+// AGENTS.md hard rule: `-v` MUST always print the latest git tag
+// (e.g. "v0.1.18"), never "muzak321 dev". If the build did not inject a
+// version, fall back to `git describe --tags --always` so the printed
+// string still reflects the real release tag rather than a placeholder.
+var version = ""
+
+// versionString returns the version to print for `-v`. It strips any
+// "-<n>-g<sha>" suffix that `git describe` appends when HEAD is past a
+// tag, so the user sees the plain tag (e.g. "v0.1.19") instead of the
+// long describe form ("v0.1.19-1-g1fac7e3").
+func versionString() string {
+	v := version
+	if v == "" {
+		// Fallback: ask git. Strip the "-N-gXXXX" tail if present so we
+		// always print the underlying tag, matching the hard rule.
+		if out, err := exec.Command("git", "describe", "--tags", "--always").Output(); err == nil {
+			v = strings.TrimSpace(string(out))
+		}
+	}
+	// `git describe` after a tag: v0.1.19-1-g1fac7e3 -> v0.1.19
+	if i := strings.Index(v, "-"); i > 0 {
+		// Only strip if what follows looks like "N-g<sha>" (digits, "g",
+		// hex). Otherwise leave it alone (e.g. user-supplied strings).
+		rest := v[i+1:]
+		if matched, _ := regexp.MatchString(`^\d+-g[0-9a-f]+$`, rest); matched {
+			v = v[:i]
+		}
+	}
+	if v == "" {
+		// Last-resort fallback so we never print "muzak321 dev".
+		return "unknown"
+	}
+	return v
+}
 
 type App struct {
 	ui      *UI
@@ -118,7 +153,7 @@ func main() {
 	}
 
 	if *versionFlag {
-		fmt.Printf("muzak321 %s\n", version)
+		fmt.Printf("muzak321 %s\n", versionString())
 		return
 	}
 
@@ -185,7 +220,7 @@ func playArgs(fileArg string, args []string) []string {
 }
 
 func printHelp() {
-	fmt.Printf("muzak321 %s — Music Player\n", version)
+	fmt.Printf("muzak321 %s — Music Player\n", versionString())
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  muzak321 <file.m3u|file.pls|file.mp3|file.flac|file.ogg|file.wav|directory|stream-url> [more files...]")
