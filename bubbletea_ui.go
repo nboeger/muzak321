@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,8 +12,23 @@ import (
 
 // BubbleTeaUI implements the UI interface using Bubble Tea.
 type BubbleTeaUI struct {
-	model *teaModel
-	app   *tea.Program
+	model      *teaModel
+	app        *tea.Program
+	browserList *stubList
+	historyList *stubList
+}
+
+// stubList provides a minimal List-like interface for compatibility
+type stubList struct {
+	idx int
+}
+
+func (s *stubList) GetCurrentItem() int {
+	return s.idx
+}
+
+func (s *stubList) SetCurrentItem(idx int) {
+	s.idx = idx
 }
 
 type teaModel struct {
@@ -73,7 +89,106 @@ func (m *teaModel) View() string {
 }
 
 func (m *teaModel) viewPlayer() string {
-	return "[Player view]"
+	// btop-style layout: header | body | status
+	header := fmt.Sprintf("%-40s%40s", m.headerLeft, m.headerRight)
+	header = applyHeaderStyle(header)
+
+	// Playlist on left, cover+spectrum on right
+	playlistLines := m.renderPlaylistLines()
+	spectrum := m.renderSpectrumLines()
+	coverArt := m.renderCoverArtLines()
+
+	// Join left and right columns
+	var body strings.Builder
+	maxLines := max(len(playlistLines), len(spectrum)+len(coverArt)+2)
+	for i := 0; i < maxLines; i++ {
+		left := ""
+		if i < len(playlistLines) {
+			left = playlistLines[i]
+		}
+		left = padRight(left, m.width/2)
+
+		right := ""
+		if i < len(coverArt) {
+			right = coverArt[i]
+		} else if i-len(coverArt)-1 < len(spectrum) {
+			right = spectrum[i-len(coverArt)-1]
+		}
+
+		body.WriteString(left)
+		body.WriteString(right)
+		body.WriteByte('\n')
+	}
+
+	status := m.status
+	status = applyStatusStyle(status)
+
+	return header + "\n" + body.String() + status
+}
+
+func (m *teaModel) renderPlaylistLines() []string {
+	lines := []string{"╭ Playlist "}
+	for i, track := range m.playlist {
+		prefix := "│ "
+		if i == m.playlistIdx {
+			prefix = "│ * "
+		}
+		lines = append(lines, fmt.Sprintf("%s%d. %s", prefix, i+1, truncate(track, m.width/2-5)))
+	}
+	lines = append(lines, "╰─")
+	return lines
+}
+
+func (m *teaModel) renderCoverArtLines() []string {
+	if m.coverArtKitty != "" {
+		return []string{m.coverArtKitty}
+	}
+	return []string{
+		"╭ Cover ╮",
+		"│       │",
+		"╰─────╯",
+	}
+}
+
+func (m *teaModel) renderSpectrumLines() []string {
+	if len(m.spectrum) == 0 {
+		return []string{"[Spectrum]"}
+	}
+	lines := []string{"╭ Spectrum "}
+	for _, row := range m.spectrum {
+		lines = append(lines, "│ "+strings.Join(row, ""))
+	}
+	lines = append(lines, "╰─")
+	return lines
+}
+
+func applyHeaderStyle(s string) string {
+	return "\x1b[48;2;58;58;58m\x1b[38;2;192;192;192m" + s + "\x1b[0m"
+}
+
+func applyStatusStyle(s string) string {
+	return "\x1b[48;2;58;58;58m\x1b[38;2;192;192;192m" + s + "\x1b[0m"
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen-3] + "..."
+	}
+	return s
+}
+
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *teaModel) viewBrowser() string {
@@ -91,7 +206,22 @@ func (m *teaModel) viewHelp() string {
 func (m *teaModel) handleKey(msg tea.KeyMsg) tea.Model {
 	switch msg.String() {
 	case "q", "ctrl+c":
+		// Quit handled by app
 		return m
+	case "j", "down":
+		if m.playlistIdx < len(m.playlist)-1 {
+			m.playlistIdx++
+		}
+	case "k", "up":
+		if m.playlistIdx > 0 {
+			m.playlistIdx--
+		}
+	case "g", "home":
+		m.playlistIdx = 0
+	case "G", "end":
+		if len(m.playlist) > 0 {
+			m.playlistIdx = len(m.playlist) - 1
+		}
 	}
 	return m
 }
@@ -107,8 +237,10 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 	}
 	p := tea.NewProgram(m)
 	return &BubbleTeaUI{
-		model: m,
-		app:   p,
+		model:       m,
+		app:         p,
+		browserList: &stubList{},
+		historyList: &stubList{},
 	}
 }
 

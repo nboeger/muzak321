@@ -52,7 +52,7 @@ func versionString() string {
 }
 
 type App struct {
-	ui      *UI
+	ui      *BubbleTeaUI
 	player  *Player
 	browser *Browser
 	shuffle bool
@@ -159,8 +159,8 @@ func main() {
 
 	player := NewPlayer()
 	a := &App{player: player, shuffle: *shuffle}
-	a.ui = NewUI()
-	a.ui.app.SetInputCapture(a.handleKey)
+	a.ui = NewBubbleTeaUI()
+	// Input is handled in Bubble Tea's Update method, not SetInputCapture
 
 	go startMPRIS(player)
 
