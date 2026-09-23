@@ -236,8 +236,3 @@ func renderSpectrum(values []float64, active bool) [][]string {
 	// Pre-rendered placeholder - will be implemented in Task 4
 	return [][]string{}
 }
-
-func renderKittyImage(img image.Image, width, height int) string {
-	// Stub - will be implemented in Task 3
-	return ""
-}
