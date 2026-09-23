@@ -190,17 +190,19 @@ func spectrumBands(samples []float64, bandEdges []float64, sampleRate int) []flo
 	return out
 }
 
-// spectrumColor returns a green→yellow→red truecolor hex string for a value
-// in [0,1].
+// spectrumColor returns a muted green→amber→red truecolor hex string for a
+// value in [0,1]. Intensity is capped well below full saturation (btop-style
+// pale/dusty palette rather than bright primary colors).
 func spectrumColor(v float64) string {
+	const lo, hi = 0x5f, 0xb0 // dim floor / muted ceiling per channel
 	var r, g int
 	switch {
 	case v < 0.5:
-		r = int(255 * v * 2)
-		g = 255
+		r = lo + int(float64(hi-lo)*v*2)
+		g = hi
 	default:
-		r = 255
-		g = int(255 * (1 - (v-0.5)*2))
+		r = hi
+		g = hi - int(float64(hi-lo)*(v-0.5)*2)
 	}
-	return fmt.Sprintf("%02x%02x%02x", r, g, 0)
+	return fmt.Sprintf("%02x%02x%02x", r, g, lo)
 }

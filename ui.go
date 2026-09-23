@@ -11,17 +11,25 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Color scheme: darker/paler, like btop defaults.
+// Color scheme: pale and muted, like btop's default theme - dark neutral
+// backgrounds, desaturated accent colors instead of saturated named colors.
 //
-//	header/status bars:  dark slate gray bg, pale foreground
-//	playing / progress:  cyan
-//	directories:         cyan
-//	errors:              red
-//	secondary/hints:    yellowish
+//	header/status bars:  dark gray bg, pale gray foreground
+//	playing / progress:  muted teal
+//	directories:         muted teal
+//	errors:              muted red
+//	secondary/hints:     muted amber
 const (
-	colHeader  = tcell.ColorDarkSlateGray
-	colBarFill = "[black:cyan]"
+	colBarFill = "[#2a2a2a:#6b9b8f]"
 	colReset   = "[-:-]"
+	colAmber   = "[#c9b46b]" // replaces bright [yellow] tags
+	colTeal    = "[#6b9b9b]" // replaces bright [aqua]/[cyan] tags
+)
+
+var (
+	colHeader   = tcell.NewRGBColor(0x3a, 0x3a, 0x3a)
+	colPaleText = tcell.NewRGBColor(0xc0, 0xc0, 0xc0)
+	colError    = tcell.NewRGBColor(0xa8, 0x6b, 0x6b) // muted dusty red
 )
 
 const (
@@ -30,11 +38,12 @@ const (
 )
 
 // Border accent colors, one per panel (btop assigns each box its own
-// accent color rather than a single uniform border).
-const (
-	borderColorPlaylist = tcell.ColorAqua
-	borderColorCoverArt = tcell.ColorFuchsia
-	borderColorSpectrum = tcell.ColorGreen
+// accent color rather than a single uniform border) - desaturated pastel
+// tones rather than tcell's saturated named colors.
+var (
+	borderColorPlaylist = tcell.NewRGBColor(0x6b, 0x9b, 0x9b) // muted teal
+	borderColorCoverArt = tcell.NewRGBColor(0xa8, 0x8b, 0xb5) // muted mauve
+	borderColorSpectrum = tcell.NewRGBColor(0x8f, 0xb0, 0x8a) // muted sage
 )
 
 func init() {
@@ -82,7 +91,7 @@ type UI struct {
 func newBar() *tview.TextView {
 	b := tview.NewTextView()
 	b.SetBackgroundColor(colHeader)
-	b.SetTextColor(tcell.ColorWhite) // pale text on dark header (btop style)
+	b.SetTextColor(colPaleText) // pale gray text on dark header (btop style)
 	return b
 }
 
@@ -251,22 +260,20 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 	u.progress.SetText(fmt.Sprintf(" %s%s%s%s%s%s%s%s",
 		colBarFill, strings.Repeat(" ", filled),
 		colReset, "[black]", strings.Repeat(" ", barWidth-filled),
-		colReset, "[yellow]", timeStr) + colReset)
+		colReset, colAmber, timeStr) + colReset)
 }
 
-// SetSpectrum renders the spectrum as a classic vertical-bar equalizer: one
-// column per frequency band, bar height represents magnitude. Uses eighth-
-// block characters for sub-row resolution (8 levels per row).
+// SetSpectrum renders the spectrum as a btop-style dot equalizer: one
+// column per frequency band, one row-resolution dot per level. Lit dots are
+// small and colored by magnitude; unlit positions are blank (no background
+// grid), so the meter reads as scattered small dots rather than a solid
+// filled bar.
 const (
-	spectrumBars   = SpectrumBands // one column per band, no downsampling
-	spectrumRows   = 12            // vertical rows of resolution per bar
-	spectrumLevels = 8             // sub-row levels per row (eighth blocks)
-)
+	spectrumBars = SpectrumBands // one column per band, no downsampling
+	spectrumRows = 12            // vertical dot resolution per bar
 
-// 9 block-height glyphs, empty to full, one eighth per step.
-var vertBlocks = [spectrumLevels + 1]rune{
-	' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█',
-}
+	dotFull = '·' // lit LED - kept as small as possible
+)
 
 func (u *UI) SetSpectrum(values []float64, active bool) {
 	if len(values) == 0 {
@@ -287,8 +294,8 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		bars = w
 	}
 
-	// Total sub-row units filled per bar, out of rows*levels.
-	units := make([]int, bars)
+	// Rows lit per column, out of spectrumRows.
+	litRows := make([]int, bars)
 	for c := 0; c < bars; c++ {
 		v := values[c]
 		if v < 0 {
@@ -296,7 +303,7 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		} else if v > 1 {
 			v = 1
 		}
-		units[c] = int(v*float64(spectrumRows*spectrumLevels) + 0.5)
+		litRows[c] = int(v*float64(spectrumRows) + 0.5)
 	}
 
 	var sb strings.Builder
@@ -307,25 +314,10 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		sb.WriteString(strings.Repeat(" ", pad))
 		rowFromBottom := spectrumRows - 1 - row
 		for c := 0; c < bars; c++ {
-			if !active {
-				// Dimmed: a resting baseline on the bottom row only.
-				if rowFromBottom == 0 {
-					sb.WriteString("[dim]▁[-]")
-				} else {
-					sb.WriteString(" ")
-				}
-				continue
-			}
-			level := units[c] - rowFromBottom*spectrumLevels
-			if level < 0 {
-				level = 0
-			} else if level > spectrumLevels {
-				level = spectrumLevels
-			}
-			if level == 0 {
-				sb.WriteString(" ")
+			if active && rowFromBottom < litRows[c] {
+				fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(values[c]), dotFull)
 			} else {
-				fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(values[c]), vertBlocks[level])
+				sb.WriteByte(' ')
 			}
 		}
 	}
@@ -359,7 +351,7 @@ func (u *UI) SetCoverArt(data []byte, mime string) {
 func (u *UI) SetPlaylist(files []string, current int) {
 	u.playlist.Clear()
 	if len(files) == 0 {
-		u.playlist.AddItem("[yellow](empty playlist)[-]", "", 0, nil)
+		u.playlist.AddItem(colAmber+"(empty playlist)[-]", "", 0, nil)
 		return
 	}
 	for i, f := range files {
@@ -367,7 +359,7 @@ func (u *UI) SetPlaylist(files []string, current int) {
 		if i == current {
 			u.playlist.AddItem(fmt.Sprintf("[::b]%d. * %s[::-]", i+1, name), "", 0, nil)
 		} else {
-			u.playlist.AddItem(fmt.Sprintf("[yellow]%2d[-] %s", i+1, name), "", 0, nil)
+			u.playlist.AddItem(fmt.Sprintf("%s%2d[-] %s", colAmber, i+1, name), "", 0, nil)
 		}
 	}
 	if current >= 0 && current < len(files) {
@@ -377,8 +369,8 @@ func (u *UI) SetPlaylist(files []string, current int) {
 
 func (u *UI) SetStatus(state PlayerState, errMsg string) {
 	if errMsg != "" {
-		u.statusLeft.SetBackgroundColor(tcell.ColorRed)
-		u.statusRight.SetBackgroundColor(tcell.ColorRed)
+		u.statusLeft.SetBackgroundColor(colError)
+		u.statusRight.SetBackgroundColor(colError)
 		u.statusLeft.SetText(" ERROR ")
 		u.statusRight.SetText(errMsg)
 		return
@@ -408,7 +400,7 @@ func (u *UI) SetBrowser(dir string, entries []DirEntry, current int) {
 
 func (u *UI) browserItemText(e DirEntry) string {
 	if e.IsDir {
-		return "[aqua]  /" + e.Name + colReset
+		return colTeal + "  /" + e.Name + colReset
 	}
 	return "   " + e.Name
 }
@@ -450,7 +442,7 @@ func (u *UI) SetLyrics(lines []LyricLine, current int) {
 		if i == current {
 			fmt.Fprintf(&sb, "[lime]%s [::b]%s[::-]\n", ts, l.Text)
 		} else {
-			fmt.Fprintf(&sb, "[yellow]%s[-] %s\n", ts, l.Text)
+			fmt.Fprintf(&sb, "%s%s[-] %s\n", colAmber, ts, l.Text)
 		}
 	}
 	u.lyricsView.SetText(sb.String())
@@ -463,7 +455,7 @@ func (u *UI) SetLyrics(lines []LyricLine, current int) {
 func (u *UI) SetHistory(entries [][]string) {
 	u.historyList.Clear()
 	if len(entries) == 0 {
-		u.historyList.AddItem("[yellow](no recently played tracks)[-]", "", 0, nil)
+		u.historyList.AddItem(colAmber+"(no recently played tracks)[-]", "", 0, nil)
 		return
 	}
 	for _, e := range entries {
@@ -475,9 +467,9 @@ func (u *UI) SetHistory(entries [][]string) {
 
 func (u *UI) ShowHelp() {
 	lines := []string{
-		"[black:magenta] muzak321 - Music Player [-:-]",
+		"[#c0c0c0:#3a3a3a] muzak321 - Music Player [-:-]",
 		"",
-		"  [yellow]Player[-]",
+		"  " + colAmber + "Player[-]",
 		"    Space          Play / Pause",
 		"    M              Mute / Unmute",
 		"    P / N          Prev / Next track",
@@ -491,7 +483,7 @@ func (u *UI) ShowHelp() {
 		"    H              This help",
 		"    Q              Quit",
 		"",
-		"  [yellow]File Browser[-]",
+		"  " + colAmber + "File Browser[-]",
 		"    Up/Down        Move",
 		"    Enter          Open directory / add selected file",
 		"    Shift+A        Add every music file in the current directory",

@@ -134,9 +134,10 @@ func TestSpectrumSmoothing(t *testing.T) {
 	}
 }
 
-// TestSetSpectrumRender — 28 columns of vertical, eighth-block-resolution
-// bars with truecolor codes when active; dimmed bottom-row baseline when
-// paused; clears when stopped.
+// TestSetSpectrumRender — 28 columns of a btop-style dot equalizer: small
+// lit dots (·) with truecolor codes when active, blank space (no
+// background grid) for unlit positions; fully blank when paused; clears
+// when stopped.
 func TestSetSpectrumRender(t *testing.T) {
 	u := NewUI()
 	u.spectrum.SetRect(0, 0, CoverArtWidth+2, spectrumRows+2) // real box size
@@ -147,8 +148,8 @@ func TestSetSpectrumRender(t *testing.T) {
 	}
 	u.SetSpectrum(vals, true)
 	text := u.spectrum.GetText(false)
-	if !strings.Contains(text, "█") {
-		t.Errorf("v=1.0 should render full blocks (█), got %q", text)
+	if !strings.Contains(text, "·") {
+		t.Errorf("v=1.0 should render lit dots (·), got %q", text)
 	}
 	if !strings.Contains(text, "#") {
 		t.Errorf("active render missing truecolor codes: %q", text)
@@ -157,43 +158,39 @@ func TestSetSpectrumRender(t *testing.T) {
 		t.Errorf("want %d rows, got %d newlines", spectrumRows, strings.Count(text, "\n"))
 	}
 
-	// Non-exact value: some rows full, some empty, one partial boundary row.
+	// Non-exact value: some rows lit, some unlit (blank).
 	partial := make([]float64, SpectrumBands)
 	for i := range partial {
 		partial[i] = 0.53
 	}
 	u.SetSpectrum(partial, true)
 	text = u.spectrum.GetText(false)
-	if !strings.Contains(text, "▃") {
-		t.Errorf("0.53 should render a partial boundary block (▃), got %q", text)
+	if !strings.Contains(text, "·") {
+		t.Errorf("0.53 should render some lit dots, got %q", text)
+	}
+	if strings.Count(text, "·") >= spectrumBars*spectrumRows {
+		t.Errorf("0.53 should leave some positions unlit/blank, got %q", text)
 	}
 
-	// Very low value: mostly empty, no full blocks anywhere.
+	// Very low value: rounds down to zero lit rows, so no dots at all.
 	low := make([]float64, SpectrumBands)
 	for i := range low {
 		low[i] = 0.02
 	}
 	u.SetSpectrum(low, true)
 	text = u.spectrum.GetText(false)
-	if strings.Contains(text, "█") {
-		t.Errorf("0.02 should not render a full block, got %q", text)
+	if strings.Contains(text, "·") {
+		t.Errorf("0.02 should render no lit dots, got %q", text)
 	}
 
-	// Inactive: dimmed baseline only on the bottom row, no color codes.
+	// Inactive: fully blank, no dots and no truecolor codes at all.
 	u.SetSpectrum(vals, false)
 	text = u.spectrum.GetText(false)
 	if strings.Contains(text, "#") {
 		t.Errorf("inactive render should have no truecolor codes, got %q", text)
 	}
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		hasBaseline := strings.Contains(line, "▁")
-		if i == len(lines)-1 && !hasBaseline {
-			t.Errorf("bottom row should show the dim baseline, got %q", line)
-		}
-		if i != len(lines)-1 && hasBaseline {
-			t.Errorf("row %d should be blank when inactive, got %q", i, line)
-		}
+	if strings.Contains(text, "·") {
+		t.Errorf("inactive render should show no dots at all, got %q", text)
 	}
 
 	u.SetSpectrum(nil, false)
