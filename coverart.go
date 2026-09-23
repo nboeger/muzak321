@@ -9,10 +9,35 @@ import (
 	_ "image/png"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/BourgeoisBear/rasterm"
 	"github.com/gdamore/tcell/v2"
 )
+
+// graphicsProtocol identifies which inline-image protocol the terminal
+// supports, detected once and cached (Sixel detection queries the terminal
+// and must not run on every draw tick).
+var (
+	gfxProtoOnce sync.Once
+	gfxProto     string // "kitty", "iterm", "sixel", or "" (none)
+)
+
+func detectGraphicsProtocol() string {
+	gfxProtoOnce.Do(func() {
+		switch {
+		case rasterm.IsKittyCapable():
+			gfxProto = "kitty"
+		case rasterm.IsItermCapable():
+			gfxProto = "iterm"
+		default:
+			if ok, _ := rasterm.IsSixelCapable(); ok {
+				gfxProto = "sixel"
+			}
+		}
+	})
+	return gfxProto
+}
 
 // coverArtBlock renders image data as width×height half-block ANSI truecolor
 // rows. Each output cell is one "▀" glyph: foreground = upper pixel,
@@ -68,49 +93,61 @@ func coverArtSixel(data []byte, out *bytes.Buffer) error {
 	return rasterm.SixelWriteImage(out, pal)
 }
 
-// coverArtRastern auto-detects the terminal and renders the image using the
-// best available inline-graphics protocol (kitty / iTerm2 / Sixel). Returns
-// "" if the terminal supports none, or the image cannot be decoded.
-func coverArtRastern(data []byte) string {
+// coverArtPayload renders data using the detected inline-graphics protocol,
+// sized to width x height terminal cells. ok is false if the terminal
+// supports no graphics protocol, or the image cannot be decoded/encoded.
+func coverArtPayload(data []byte, width, height int) (payload string, ok bool) {
+	proto := detectGraphicsProtocol()
+	if proto == "" {
+		return "", false
+	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return ""
+		return "", false
 	}
+
 	var out bytes.Buffer
-	if rasterm.IsKittyCapable() {
-		if err := rasterm.KittyWriteImage(&out, img, rasterm.KittyImgOpts{}); err == nil {
-			return out.String()
+	switch proto {
+	case "kitty":
+		opts := rasterm.KittyImgOpts{DstCols: uint32(width), DstRows: uint32(height)}
+		if err := rasterm.KittyWriteImage(&out, img, opts); err != nil {
+			return "", false
+		}
+	case "iterm":
+		opts := rasterm.ItermImgOpts{
+			Width:         fmt.Sprintf("%d", width),
+			Height:        fmt.Sprintf("%d", height),
+			DisplayInline: true,
+		}
+		if err := rasterm.ItermWriteImageWithOptions(&out, img, opts); err != nil {
+			return "", false
+		}
+	case "sixel":
+		if err := coverArtSixel(data, &out); err != nil {
+			return "", false
 		}
 	}
-	if rasterm.IsItermCapable() {
-		if err := rasterm.ItermWriteImage(&out, img); err == nil {
-			return out.String()
-		}
-	}
-	if ok, _ := rasterm.IsSixelCapable(); ok {
-		if err := coverArtSixel(data, &out); err == nil {
-			return out.String()
-		}
-	}
-	return ""
+	return out.String(), true
 }
 
 // coverArtDrawFunc returns a tview SetDrawFunc that emits the cover image
-// as sixel graphics directly to the terminal. Used when the terminal is
-// SIXEL-capable so the image renders as real graphics (not text).
-func coverArtDrawFunc(data []byte) func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
-	ok, _ := rasterm.IsSixelCapable()
+// via the terminal's native inline-graphics protocol (Kitty / iTerm2 /
+// Sixel), positioned at the box's inner (post-border) cell. Returns nil if
+// the terminal supports no graphics protocol or the image can't be encoded,
+// so the caller can fall back to coverArtBlock ASCII rendering.
+func coverArtDrawFunc(data []byte, width, height int) func(screen tcell.Screen, x, y, w, h int) (int, int, int, int) {
+	payload, ok := coverArtPayload(data, width, height)
 	if !ok {
 		return nil
 	}
-	return func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
-		var out bytes.Buffer
-		if coverArtSixel(data, &out) != nil {
-			return x, y, width, height
-		}
-		// Emit the sixel payload directly to the terminal. The terminal renders
-		// it as a graphic overlay over the cover-art cell area.
-		os.Stdout.Write(out.Bytes())
-		return x, y, width, height
+	return func(screen tcell.Screen, x, y, w, h int) (int, int, int, int) {
+		innerX, innerY := x+1, y+1
+		innerW, innerH := w-2, h-2
+		// Position the cursor at the box's inner top-left (1-indexed ANSI
+		// CUP) before emitting the graphics escape sequence, since these
+		// protocols place the image relative to the current cursor cell.
+		fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", innerY+1, innerX+1)
+		os.Stdout.WriteString(payload)
+		return innerX, innerY, innerW, innerH
 	}
 }

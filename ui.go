@@ -332,8 +332,11 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 	u.spectrum.SetText(sb.String())
 }
 
-// SetCoverArt renders the current file's embedded art inside the playlist
-// box. The rendered string is cached so it is not re-rendered on every tick.
+// SetCoverArt renders the current file's embedded art inside the cover art
+// box. When the terminal supports an inline-graphics protocol (Kitty,
+// iTerm2, Sixel) the real image is drawn via SetDrawFunc; otherwise it falls
+// back to an ANSI half-block ASCII rendering. The rendered string is cached
+// so it is not re-rendered on every tick.
 func (u *UI) SetCoverArt(data []byte, mime string) {
 	if bytes.Equal(data, u.lastCover) {
 		return
@@ -341,8 +344,15 @@ func (u *UI) SetCoverArt(data []byte, mime string) {
 	u.lastCover = data
 	if len(data) == 0 {
 		u.coverArt.SetText("")
+		u.coverArt.SetDrawFunc(nil)
 		return
 	}
+	if fn := coverArtDrawFunc(data, CoverArtWidth, CoverArtHeight); fn != nil {
+		u.coverArt.SetText("")
+		u.coverArt.SetDrawFunc(fn)
+		return
+	}
+	u.coverArt.SetDrawFunc(nil)
 	u.coverArt.SetText(coverArtBlock(data, CoverArtWidth, CoverArtHeight))
 }
 

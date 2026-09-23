@@ -3,6 +3,7 @@ module muzak321
 go 1.25.0
 
 require (
+	github.com/BourgeoisBear/rasterm v1.1.2
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/faiface/beep v1.1.0
 	github.com/gdamore/tcell/v2 v2.8.1
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/BourgeoisBear/rasterm v1.1.2 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/hajimehoshi/oto v0.7.1 // indirect
 	github.com/icza/bitio v1.0.0 // indirect
