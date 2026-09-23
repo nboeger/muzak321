@@ -140,14 +140,25 @@ func coverArtDrawFunc(data []byte, width, height int) func(screen tcell.Screen, 
 	if !ok {
 		return nil
 	}
+	// tview calls the installed draw func on every screen redraw (the
+	// spectrum animation alone triggers ~30/sec). The image only needs to
+	// be transmitted once per SetCoverArt() change - re-emitting the full
+	// base64 payload every frame floods the terminal and starves input
+	// handling. `written` gates that: false only for the first draw after
+	// this closure is installed.
+	written := false
 	return func(screen tcell.Screen, x, y, w, h int) (int, int, int, int) {
 		innerX, innerY := x+1, y+1
 		innerW, innerH := w-2, h-2
-		// Position the cursor at the box's inner top-left (1-indexed ANSI
-		// CUP) before emitting the graphics escape sequence, since these
-		// protocols place the image relative to the current cursor cell.
-		fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", innerY+1, innerX+1)
-		os.Stdout.WriteString(payload)
+		if !written {
+			written = true
+			// Position the cursor at the box's inner top-left (1-indexed
+			// ANSI CUP) before emitting the graphics escape sequence,
+			// since these protocols place the image relative to the
+			// current cursor cell.
+			fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", innerY+1, innerX+1)
+			os.Stdout.WriteString(payload)
+		}
 		return innerX, innerY, innerW, innerH
 	}
 }
