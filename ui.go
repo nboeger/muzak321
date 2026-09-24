@@ -11,39 +11,9 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Color scheme: pale and muted, like btop's default theme - dark neutral
-// backgrounds, desaturated accent colors instead of saturated named colors.
-//
-//	header/status bars:  dark gray bg, pale gray foreground
-//	playing / progress:  muted teal
-//	directories:         muted teal
-//	errors:              muted red
-//	secondary/hints:     muted amber
-const (
-	colBarFill = "[#2a2a2a:#6b9b8f]"
-	colReset   = "[-:-]"
-	colAmber   = "[#c9b46b]" // replaces bright [yellow] tags
-	colTeal    = "[#6b9b9b]" // replaces bright [aqua]/[cyan] tags
-)
-
-var (
-	colHeader   = tcell.NewRGBColor(0x3a, 0x3a, 0x3a)
-	colPaleText = tcell.NewRGBColor(0xc0, 0xc0, 0xc0)
-	colError    = tcell.NewRGBColor(0xa8, 0x6b, 0x6b) // muted dusty red
-)
-
 const (
 	CoverArtWidth  = 32
 	CoverArtHeight = 16
-)
-
-// Border accent colors, one per panel (btop assigns each box its own
-// accent color rather than a single uniform border) - desaturated pastel
-// tones rather than tcell's saturated named colors.
-var (
-	borderColorPlaylist = tcell.NewRGBColor(0x6b, 0x9b, 0x9b) // muted teal
-	borderColorCoverArt = tcell.NewRGBColor(0xa8, 0x8b, 0xb5) // muted mauve
-	borderColorSpectrum = tcell.NewRGBColor(0x8f, 0xb0, 0x8a) // muted sage
 )
 
 func init() {
@@ -107,15 +77,15 @@ func NewUI() *UI {
 		AddItem(u.headerRight, 1, 0, false)
 
 	u.progress = tview.NewTextView().SetDynamicColors(true)
-	u.progress.SetBackgroundColor(tcell.ColorBlack)
+	u.progress.SetBackgroundColor(colBodyBG)
 
 	u.spectrum = tview.NewTextView().SetDynamicColors(true)
-	u.spectrum.SetBackgroundColor(tcell.ColorBlack)
+	u.spectrum.SetBackgroundColor(colBodyBG)
 	u.spectrum.SetBorder(true).SetTitle(" Spectrum ")
 	u.spectrum.SetBorderColor(borderColorSpectrum)
 
 	u.coverArt = tview.NewTextView().SetDynamicColors(true)
-	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
+	u.coverArt.SetBackgroundColor(colBodyBG)
 	u.coverArt.SetBorder(true).SetTitle(" Cover ")
 	u.coverArt.SetBorderColor(borderColorCoverArt)
 
@@ -130,7 +100,7 @@ func NewUI() *UI {
 	u.playlist.SetHighlightFullLine(false)
 	u.playlist.SetWrapAround(false)
 	u.playlist.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorWhite).Background(tcell.ColorBlack).
+		Foreground(colPlaylistSelFG).Background(colPlaylistSelBG).
 		Bold(true))
 	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 	u.playlist.SetBorderColor(borderColorPlaylist)
@@ -159,7 +129,7 @@ func NewUI() *UI {
 	u.browserList.SetHighlightFullLine(true)
 	u.browserList.SetWrapAround(true)
 	u.browserList.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorBlack).Background(tcell.ColorWhite))
+		Foreground(colBrowserSelFG).Background(colBrowserSelBG))
 	u.browserStatus = newBar()
 
 	browserPage := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -259,7 +229,7 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 
 	u.progress.SetText(fmt.Sprintf(" %s%s%s%s%s%s%s%s",
 		colBarFill, strings.Repeat(" ", filled),
-		colReset, "[black]", strings.Repeat(" ", barWidth-filled),
+		colReset, "[:#"+barFillBGHex+"]", strings.Repeat(" ", barWidth-filled),
 		colReset, colAmber, timeStr) + colReset)
 }
 
@@ -488,7 +458,7 @@ func (u *UI) SetHistory(entries [][]string) {
 
 func (u *UI) ShowHelp() {
 	lines := []string{
-		"[#c0c0c0:#3a3a3a] muzak321 - Music Player [-:-]",
+		"[#" + colorHex(colPaleText) + ":" + colorHex(colHeader) + "] muzak321 - Music Player [-:-]",
 		"",
 		"  " + colAmber + "Player[-]",
 		"    Space          Play / Pause",

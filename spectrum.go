@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"sync"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // Spectrum constants.
@@ -190,19 +192,30 @@ func spectrumBands(samples []float64, bandEdges []float64, sampleRate int) []flo
 	return out
 }
 
-// spectrumColor returns a muted green→amber→red truecolor hex string for a
-// value in [0,1]. Intensity is capped well below full saturation (btop-style
-// pale/dusty palette rather than bright primary colors).
+// spectrumColor returns a truecolor hex string for a value in [0,1],
+// linearly interpolated across the theme's spectrum_low → spectrum_mid →
+// spectrum_high keyframes (spectrum_low at v=0, spectrum_mid at v=0.5,
+// spectrum_high at v=1). Each channel's delta is truncated to int before
+// being added to its base value (rather than truncating the final sum),
+// which is what makes this bit-exact with the original two-branch formula
+// at the default palette.
 func spectrumColor(v float64) string {
-	const lo, hi = 0x5f, 0xb0 // dim floor / muted ceiling per channel
-	var r, g int
-	switch {
-	case v < 0.5:
-		r = lo + int(float64(hi-lo)*v*2)
-		g = hi
-	default:
-		r = hi
-		g = hi - int(float64(hi-lo)*(v-0.5)*2)
+	if v < 0 {
+		v = 0
+	} else if v > 1 {
+		v = 1
 	}
-	return fmt.Sprintf("%02x%02x%02x", r, g, lo)
+	var from, to tcell.Color
+	var t float64
+	if v < 0.5 {
+		from, to, t = spectrumLow, spectrumMid, v*2
+	} else {
+		from, to, t = spectrumMid, spectrumHigh, (v-0.5)*2
+	}
+	r1, g1, b1 := from.RGB()
+	r2, g2, b2 := to.RGB()
+	r := int(r1) + int(float64(r2-r1)*t)
+	g := int(g1) + int(float64(g2-g1)*t)
+	b := int(b1) + int(float64(b2-b1)*t)
+	return fmt.Sprintf("%02x%02x%02x", r, g, b)
 }
