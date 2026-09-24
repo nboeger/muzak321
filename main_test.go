@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+// TestNormalizeTerm — some terminal emulators (kitty, in particular) are
+// commonly misconfigured with a bare $TERM value that has no terminfo
+// entry under that exact name (kitty ships its entry as "xterm-kitty").
+// tcell falls back to shelling out to `infocmp`, which fails silently in
+// confined environments (e.g. strict snaps) with no useful diagnostic.
+// normalizeTerm remaps the known-bad values to the name tcell actually
+// has built in, so the app works without requiring a $TERM workaround.
+func TestNormalizeTerm(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"kitty", "xterm-kitty"},
+		{"xterm-kitty", "xterm-kitty"}, // already correct: unchanged
+		{"xterm-256color", "xterm-256color"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeTerm(tt.in); got != tt.want {
+			t.Errorf("normalizeTerm(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // TestPlayArgs — positional arguments and the -f flag both select play
 // mode; the flag value always comes first so the playlist order is stable.
 func TestPlayArgs(t *testing.T) {

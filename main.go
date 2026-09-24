@@ -139,6 +139,24 @@ func expandFiles(paths []string) ([]string, error) {
 	return result, nil
 }
 
+// termAliases maps $TERM values that have no terminfo entry under their
+// own name to the name tcell actually ships built in. Without this,
+// tcell falls back to shelling out to `infocmp`, which fails silently in
+// confined environments (e.g. strict snaps) and prints only "exit status
+// 1" with no indication that $TERM is the cause.
+var termAliases = map[string]string{
+	"kitty": "xterm-kitty",
+}
+
+// normalizeTerm returns the terminfo-recognized name for term, or term
+// unchanged if it's not a known alias.
+func normalizeTerm(term string) string {
+	if alias, ok := termAliases[term]; ok {
+		return alias
+	}
+	return term
+}
+
 func main() {
 	fileArg := flag.String("f", "", "audio file, playlist, directory, or glob pattern")
 	help := flag.Bool("h", false, "Show help")
@@ -155,6 +173,10 @@ func main() {
 	if *versionFlag {
 		fmt.Printf("muzak321 %s\n", versionString())
 		return
+	}
+
+	if term := normalizeTerm(os.Getenv("TERM")); term != os.Getenv("TERM") {
+		os.Setenv("TERM", term)
 	}
 
 	loadTheme()
