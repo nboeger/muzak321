@@ -108,6 +108,50 @@ sudo usermod -a -G audio $USER
 
 If playback fails, the app shows a diagnostic message indicating the likely cause (permissions, missing hardware, etc.).
 
+## Custom Themes
+
+muzak321 reads an optional theme file at
+`$XDG_CONFIG_HOME/muzak321/theme.conf` (falling back to
+`~/.config/muzak321/theme.conf` if `XDG_CONFIG_HOME` isn't set). If the
+file doesn't exist, the built-in pale/muted color scheme is used
+unchanged.
+
+Format: one `key = #rrggbb` pair per line. Blank lines and lines starting
+with `#` are ignored.
+
+```conf
+# ~/.config/muzak321/theme.conf
+header_bg = #3a3a3a
+header_fg = #c0c0c0
+```
+
+Any line with an unknown key or an invalid color prints a warning to
+stderr and keeps that key's default — it never stops the app from
+starting.
+
+Available keys and their defaults:
+
+| Key | Default | Controls |
+| --- | --- | --- |
+| `header_bg` | `#3a3a3a` | Header/status bar background |
+| `header_fg` | `#c0c0c0` | Header/status bar text |
+| `error_bg` | `#a86b6b` | Status bar background on error |
+| `bar_fill_bg` | `#2a2a2a` | Progress bar track background |
+| `bar_fill_fg` | `#6b9b8f` | Progress bar filled portion |
+| `accent_amber` | `#c9b46b` | Hints, track numbers, headings |
+| `accent_teal` | `#6b9b9b` | Directory entries in the file browser |
+| `border_playlist` | `#6b9b9b` | Playlist panel border |
+| `border_coverart` | `#a88bb5` | Cover art panel border |
+| `border_spectrum` | `#8fb08a` | Spectrum panel border |
+| `spectrum_low` | `#5fb05f` | Spectrum color at 0% level |
+| `spectrum_mid` | `#b0b05f` | Spectrum color at 50% level |
+| `spectrum_high` | `#b05f5f` | Spectrum color at 100% level |
+| `body_bg` | `#000000` | Progress/spectrum/cover art panel backgrounds |
+| `playlist_selected_fg` | `#ffffff` | Selected playlist row text |
+| `playlist_selected_bg` | `#000000` | Selected playlist row background |
+| `browser_selected_fg` | `#000000` | Selected file-browser row text |
+| `browser_selected_bg` | `#ffffff` | Selected file-browser row background |
+
 ## Screen Shots
 
 ![Playlist screen](screen-shots/playlist-screen.png)
