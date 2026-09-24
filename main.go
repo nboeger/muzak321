@@ -157,6 +157,8 @@ func main() {
 		return
 	}
 
+	loadTheme()
+
 	player := NewPlayer()
 	a := &App{player: player, shuffle: *shuffle}
 	a.ui = NewUI()

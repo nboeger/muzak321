@@ -77,15 +77,15 @@ func NewUI() *UI {
 		AddItem(u.headerRight, 1, 0, false)
 
 	u.progress = tview.NewTextView().SetDynamicColors(true)
-	u.progress.SetBackgroundColor(tcell.ColorBlack)
+	u.progress.SetBackgroundColor(colBodyBG)
 
 	u.spectrum = tview.NewTextView().SetDynamicColors(true)
-	u.spectrum.SetBackgroundColor(tcell.ColorBlack)
+	u.spectrum.SetBackgroundColor(colBodyBG)
 	u.spectrum.SetBorder(true).SetTitle(" Spectrum ")
 	u.spectrum.SetBorderColor(borderColorSpectrum)
 
 	u.coverArt = tview.NewTextView().SetDynamicColors(true)
-	u.coverArt.SetBackgroundColor(tcell.ColorBlack)
+	u.coverArt.SetBackgroundColor(colBodyBG)
 	u.coverArt.SetBorder(true).SetTitle(" Cover ")
 	u.coverArt.SetBorderColor(borderColorCoverArt)
 
@@ -100,7 +100,7 @@ func NewUI() *UI {
 	u.playlist.SetHighlightFullLine(false)
 	u.playlist.SetWrapAround(false)
 	u.playlist.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorWhite).Background(tcell.ColorBlack).
+		Foreground(colPlaylistSelFG).Background(colPlaylistSelBG).
 		Bold(true))
 	u.playlist.SetBorder(true).SetTitle(" Playlist ")
 	u.playlist.SetBorderColor(borderColorPlaylist)
@@ -129,7 +129,7 @@ func NewUI() *UI {
 	u.browserList.SetHighlightFullLine(true)
 	u.browserList.SetWrapAround(true)
 	u.browserList.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorBlack).Background(tcell.ColorWhite))
+		Foreground(colBrowserSelFG).Background(colBrowserSelBG))
 	u.browserStatus = newBar()
 
 	browserPage := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -458,7 +458,7 @@ func (u *UI) SetHistory(entries [][]string) {
 
 func (u *UI) ShowHelp() {
 	lines := []string{
-		"[#c0c0c0:#3a3a3a] muzak321 - Music Player [-:-]",
+		"[#" + colorHex(colPaleText) + ":" + colorHex(colHeader) + "] muzak321 - Music Player [-:-]",
 		"",
 		"  " + colAmber + "Player[-]",
 		"    Space          Play / Pause",
