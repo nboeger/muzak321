@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -81,4 +86,89 @@ func mustColor(hex string) tcell.Color {
 		panic(err)
 	}
 	return c
+}
+
+// themeSetters maps each theme.conf key to the function that applies a
+// validated 6-digit hex value (no leading '#') to the matching package
+// var(s).
+var themeSetters = map[string]func(hex string){
+	"header_bg": func(hex string) { colHeader = mustColor(hex) },
+	"header_fg": func(hex string) { colPaleText = mustColor(hex) },
+	"error_bg":  func(hex string) { colError = mustColor(hex) },
+
+	"bar_fill_bg": func(hex string) { barFillBGHex = hex; colBarFill = buildBarFill() },
+	"bar_fill_fg": func(hex string) { barFillFGHex = hex; colBarFill = buildBarFill() },
+
+	"accent_amber": func(hex string) { accentAmberHex = hex; colAmber = "[#" + hex + "]" },
+	"accent_teal":  func(hex string) { accentTealHex = hex; colTeal = "[#" + hex + "]" },
+
+	"border_playlist": func(hex string) { borderColorPlaylist = mustColor(hex) },
+	"border_coverart": func(hex string) { borderColorCoverArt = mustColor(hex) },
+	"border_spectrum": func(hex string) { borderColorSpectrum = mustColor(hex) },
+
+	"spectrum_low":  func(hex string) { spectrumLow = mustColor(hex) },
+	"spectrum_mid":  func(hex string) { spectrumMid = mustColor(hex) },
+	"spectrum_high": func(hex string) { spectrumHigh = mustColor(hex) },
+
+	"body_bg": func(hex string) { colBodyBG = mustColor(hex) },
+
+	"playlist_selected_fg": func(hex string) { colPlaylistSelFG = mustColor(hex) },
+	"playlist_selected_bg": func(hex string) { colPlaylistSelBG = mustColor(hex) },
+	"browser_selected_fg":  func(hex string) { colBrowserSelFG = mustColor(hex) },
+	"browser_selected_bg":  func(hex string) { colBrowserSelBG = mustColor(hex) },
+}
+
+// applyThemeReader parses theme.conf-formatted content from r, applying
+// each valid "key = #rrggbb" line to the matching package var via
+// themeSetters. It returns one warning string per malformed line, unknown
+// key, or invalid color value; valid lines, blank lines, and full-line
+// comments (first non-whitespace char '#') produce no warning.
+func applyThemeReader(r io.Reader) []string {
+	var warnings []string
+	scanner := bufio.NewScanner(r)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			warnings = append(warnings, fmt.Sprintf("line %d: malformed line %q (want key = #rrggbb)", lineNo, line))
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		setter, ok := themeSetters[key]
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("line %d: unknown key %q", lineNo, key))
+			continue
+		}
+		if _, err := hexToColor(value); err != nil {
+			warnings = append(warnings, fmt.Sprintf("line %d: %v", lineNo, err))
+			continue
+		}
+		setter(value[1:]) // strip leading '#'
+	}
+	return warnings
+}
+
+// loadTheme applies $XDG_CONFIG_HOME/muzak321/theme.conf (falling back to
+// ~/.config per os.UserConfigDir) over the default palette, if present.
+// A missing file or directory is silent; malformed content produces
+// warnings on stderr but never stops startup.
+func loadTheme() {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	f, err := os.Open(filepath.Join(dir, "muzak321", "theme.conf"))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	for _, w := range applyThemeReader(f) {
+		fmt.Fprintln(os.Stderr, "warning: theme.conf "+w)
+	}
 }
