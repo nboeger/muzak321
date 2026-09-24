@@ -211,7 +211,10 @@ func main() {
 		a.showBrowser()
 	}
 
-	a.ui.Run()
+	if err := a.ui.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // playArgs combines the -f flag value (if any) with the positional

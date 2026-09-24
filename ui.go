@@ -164,7 +164,7 @@ func NewUI() *UI {
 	return u
 }
 
-func (u *UI) Run()            { u.app.Run() }
+func (u *UI) Run() error      { return u.app.Run() }
 func (u *UI) Stop()           { u.app.Stop() }
 func (u *UI) Queue(fn func()) { u.app.QueueUpdateDraw(fn) }
 
