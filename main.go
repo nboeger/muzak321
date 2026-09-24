@@ -158,6 +158,9 @@ func main() {
 	}
 
 	loadTheme()
+	if err := installDefaultCovers(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not install default cover art: %v\n", err)
+	}
 
 	player := NewPlayer()
 	a := &App{player: player, shuffle: *shuffle}

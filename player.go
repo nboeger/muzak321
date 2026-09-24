@@ -658,7 +658,7 @@ func (p *Player) playCurrent() {
 	p.curMP3Stream = curMS
 	p.sampleRate = sr
 	if liveStream == nil {
-		p.coverData, p.coverMIME = readCoverArt(file)
+		p.coverData, p.coverMIME = coverArtOrFallback(readCoverArt(file))
 		title, artist := trackTitleArtist(file)
 		notify(title, artist, file)
 		lines, lerr := loadLRC(file)
@@ -680,7 +680,7 @@ func (p *Player) playCurrent() {
 			}
 		}()
 	} else {
-		p.coverData, p.coverMIME = nil, ""
+		p.coverData, p.coverMIME = coverArtOrFallback(nil, "")
 		p.lyrics = nil
 		p.lyricsPath = ""
 	}

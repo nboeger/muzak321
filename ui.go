@@ -483,6 +483,11 @@ func (u *UI) ShowHelp() {
 		"    H              This help",
 		"    Q              Quit",
 		"",
+		"  " + colAmber + "Fallback Cover Art[-]",
+		"    Tracks with no embedded art show a random image from",
+		"    ~/.config/muzak321/covers/ instead. Add, remove, or swap",
+		"    files there to customize what shows.",
+		"",
 		"  [lime]Press any key to return...[-]",
 	}
 	u.help.SetText(strings.Join(lines, "\n"))

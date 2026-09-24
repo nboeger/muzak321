@@ -23,8 +23,8 @@ func TestHexToColorInvalid(t *testing.T) {
 		"#3a9bd",   // 5 digits
 		"#3a9bd00", // 7 digits
 		"#gggggg",  // non-hex digits
-		"#+2b2b2", // leading '+' sign; ParseInt accepts it as valid hex, a color shouldn't
-		"#-2b2b2", // leading '-' sign, same issue
+		"#+2b2b2",  // leading '+' sign; ParseInt accepts it as valid hex, a color shouldn't
+		"#-2b2b2",  // leading '-' sign, same issue
 		"",
 	}
 	for _, s := range cases {

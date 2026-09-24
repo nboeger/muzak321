@@ -152,6 +152,16 @@ Available keys and their defaults:
 | `browser_selected_fg` | `#000000` | Selected file-browser row text |
 | `browser_selected_bg` | `#ffffff` | Selected file-browser row background |
 
+## Fallback Cover Art
+
+Tracks with no embedded cover art (no `APIC`/picture tag, or a live radio
+stream) show a random image from `~/.config/muzak321/covers/` instead. The
+directory is created and populated with a handful of default images the
+first time you run muzak321; after that it's yours to customize — add your
+own pictures, remove the defaults, or replace them entirely. Each track
+with no art of its own picks a random file from that directory, so
+consecutive art-less tracks can show different images.
+
 ## Screen Shots
 
 ![Playlist screen](screen-shots/playlist-screen.png)
