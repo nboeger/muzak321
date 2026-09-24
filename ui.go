@@ -229,7 +229,7 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 
 	u.progress.SetText(fmt.Sprintf(" %s%s%s%s%s%s%s%s",
 		colBarFill, strings.Repeat(" ", filled),
-		colReset, "[black]", strings.Repeat(" ", barWidth-filled),
+		colReset, "[:#"+barFillBGHex+"]", strings.Repeat(" ", barWidth-filled),
 		colReset, colAmber, timeStr) + colReset)
 }
 

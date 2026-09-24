@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHexToColorValid(t *testing.T) {
@@ -22,6 +23,8 @@ func TestHexToColorInvalid(t *testing.T) {
 		"#3a9bd",   // 5 digits
 		"#3a9bd00", // 7 digits
 		"#gggggg",  // non-hex digits
+		"#+2b2b2", // leading '+' sign; ParseInt accepts it as valid hex, a color shouldn't
+		"#-2b2b2", // leading '-' sign, same issue
 		"",
 	}
 	for _, s := range cases {
@@ -159,5 +162,19 @@ func TestSpectrumColorCustomKeyframes(t *testing.T) {
 	}
 	if got := spectrumColor(1.0); got != "ffffff" {
 		t.Errorf("spectrumColor(1.0) = %q, want %q", got, "ffffff")
+	}
+}
+
+func TestSetProgressTrackUsesBarFillBG(t *testing.T) {
+	origHex := barFillBGHex
+	t.Cleanup(func() { barFillBGHex = origHex; colBarFill = buildBarFill() })
+	barFillBGHex = "445566"
+	colBarFill = buildBarFill()
+
+	u := NewUI()
+	u.SetProgress(30*time.Second, 100*time.Second)
+	text := u.progress.GetText(false)
+	if !strings.Contains(text, "[:#445566]") {
+		t.Errorf("progress text missing unfilled-track background tag for bar_fill_bg, got %q", text)
 	}
 }

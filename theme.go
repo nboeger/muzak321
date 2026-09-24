@@ -60,6 +60,11 @@ func hexToColor(s string) (tcell.Color, error) {
 	if len(s) != 7 || s[0] != '#' {
 		return 0, fmt.Errorf("invalid color %q: want #rrggbb", s)
 	}
+	for _, c := range s[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return 0, fmt.Errorf("invalid color %q: want #rrggbb", s)
+		}
+	}
 	v, err := strconv.ParseInt(s[1:], 16, 32)
 	if err != nil {
 		return 0, fmt.Errorf("invalid color %q: %w", s, err)
