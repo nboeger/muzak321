@@ -263,16 +263,25 @@ func (u *UI) SetProgress(pos, dur time.Duration) {
 		colReset, colAmber, timeStr) + colReset)
 }
 
-// SetSpectrum renders the spectrum as a btop-style dot equalizer: one
-// column per frequency band, one row-resolution dot per level. Lit dots are
-// small and colored by magnitude; unlit positions are blank (no background
-// grid), so the meter reads as scattered small dots rather than a solid
-// filled bar.
+// SetSpectrum renders the spectrum as a btop-style braille dot equalizer:
+// one column per frequency band, each character cell packing a 2x4 grid of
+// braille sub-pixels for a much finer, speckled texture than a single dot
+// per row. Lit sub-pixels are colored by magnitude; unlit positions are
+// blank (no background grid), so the meter reads as a field of tiny
+// scattered pixels rather than a solid filled bar.
 const (
-	spectrumBars = SpectrumBands // one column per band, no downsampling
-	spectrumRows = 12            // vertical dot resolution per bar
+	spectrumBars   = SpectrumBands // one column per band, no downsampling
+	spectrumRows   = 12            // vertical character-row resolution per bar
+	spectrumSubRow = 4             // braille sub-pixel rows packed per character row
 
-	dotFull = '·' // lit LED - kept as small as possible
+	brailleBase = 0x2800 // Unicode Braille Patterns block origin
+)
+
+// brailleLeftBits and brailleRightBits give the dot bit for each of the 4
+// sub-pixel rows (top to bottom) in the left and right braille columns.
+var (
+	brailleLeftBits  = [spectrumSubRow]byte{0x01, 0x02, 0x04, 0x40}
+	brailleRightBits = [spectrumSubRow]byte{0x08, 0x10, 0x20, 0x80}
 )
 
 func (u *UI) SetSpectrum(values []float64, active bool) {
@@ -294,8 +303,9 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		bars = w
 	}
 
-	// Rows lit per column, out of spectrumRows.
-	litRows := make([]int, bars)
+	// Sub-pixels lit per column, out of spectrumRows*spectrumSubRow.
+	const subRows = spectrumRows * spectrumSubRow
+	litSub := make([]int, bars)
 	for c := 0; c < bars; c++ {
 		v := values[c]
 		if v < 0 {
@@ -303,7 +313,7 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		} else if v > 1 {
 			v = 1
 		}
-		litRows[c] = int(v*float64(spectrumRows) + 0.5)
+		litSub[c] = int(v*float64(subRows) + 0.5)
 	}
 
 	var sb strings.Builder
@@ -314,11 +324,22 @@ func (u *UI) SetSpectrum(values []float64, active bool) {
 		sb.WriteString(strings.Repeat(" ", pad))
 		rowFromBottom := spectrumRows - 1 - row
 		for c := 0; c < bars; c++ {
-			if active && rowFromBottom < litRows[c] {
-				fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(values[c]), dotFull)
-			} else {
+			if !active {
 				sb.WriteByte(' ')
+				continue
 			}
+			var bits byte
+			for d := 0; d < spectrumSubRow; d++ {
+				subFromBottom := rowFromBottom*spectrumSubRow + (spectrumSubRow - 1 - d)
+				if subFromBottom < litSub[c] {
+					bits |= brailleLeftBits[d] | brailleRightBits[d]
+				}
+			}
+			if bits == 0 {
+				sb.WriteByte(' ')
+				continue
+			}
+			fmt.Fprintf(&sb, "[#%s]%c[-]", spectrumColor(values[c]), rune(brailleBase+int(bits)))
 		}
 	}
 	u.spectrum.SetText(sb.String())

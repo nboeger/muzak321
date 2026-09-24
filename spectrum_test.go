@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"math/bits"
 	"strings"
 	"testing"
 )
@@ -134,10 +135,33 @@ func TestSpectrumSmoothing(t *testing.T) {
 	}
 }
 
-// TestSetSpectrumRender — 28 columns of a btop-style dot equalizer: small
-// lit dots (·) with truecolor codes when active, blank space (no
-// background grid) for unlit positions; fully blank when paused; clears
-// when stopped.
+// hasBrailleDot reports whether text contains any Unicode Braille Patterns
+// character (U+2800-U+28FF), i.e. at least one lit sub-pixel cell.
+func hasBrailleDot(text string) bool {
+	for _, r := range text {
+		if r >= 0x2800 && r <= 0x28FF {
+			return true
+		}
+	}
+	return false
+}
+
+// countBrailleDots returns the total number of lit sub-pixels across all
+// braille cells in text (popcount of each cell's dot bits).
+func countBrailleDots(text string) int {
+	n := 0
+	for _, r := range text {
+		if r >= 0x2800 && r <= 0x28FF {
+			n += bits.OnesCount8(byte(r - 0x2800))
+		}
+	}
+	return n
+}
+
+// TestSetSpectrumRender — 28 columns of a btop-style braille dot equalizer:
+// small lit sub-pixels (braille dots) with truecolor codes when active,
+// blank space (no background grid) for unlit positions; fully blank when
+// paused; clears when stopped.
 func TestSetSpectrumRender(t *testing.T) {
 	u := NewUI()
 	u.spectrum.SetRect(0, 0, CoverArtWidth+2, spectrumRows+2) // real box size
@@ -148,8 +172,8 @@ func TestSetSpectrumRender(t *testing.T) {
 	}
 	u.SetSpectrum(vals, true)
 	text := u.spectrum.GetText(false)
-	if !strings.Contains(text, "·") {
-		t.Errorf("v=1.0 should render lit dots (·), got %q", text)
+	if !hasBrailleDot(text) {
+		t.Errorf("v=1.0 should render lit braille dots, got %q", text)
 	}
 	if !strings.Contains(text, "#") {
 		t.Errorf("active render missing truecolor codes: %q", text)
@@ -158,29 +182,29 @@ func TestSetSpectrumRender(t *testing.T) {
 		t.Errorf("want %d rows, got %d newlines", spectrumRows, strings.Count(text, "\n"))
 	}
 
-	// Non-exact value: some rows lit, some unlit (blank).
+	// Non-exact value: some sub-pixels lit, some unlit (blank).
 	partial := make([]float64, SpectrumBands)
 	for i := range partial {
 		partial[i] = 0.53
 	}
 	u.SetSpectrum(partial, true)
 	text = u.spectrum.GetText(false)
-	if !strings.Contains(text, "·") {
+	if !hasBrailleDot(text) {
 		t.Errorf("0.53 should render some lit dots, got %q", text)
 	}
-	if strings.Count(text, "·") >= spectrumBars*spectrumRows {
-		t.Errorf("0.53 should leave some positions unlit/blank, got %q", text)
+	if countBrailleDots(text) >= spectrumBars*spectrumRows*spectrumSubRow*2 {
+		t.Errorf("0.53 should leave some sub-pixels unlit/blank, got %q", text)
 	}
 
-	// Very low value: rounds down to zero lit rows, so no dots at all.
+	// Very low value: rounds down to zero lit sub-pixels, so no dots at all.
 	low := make([]float64, SpectrumBands)
 	for i := range low {
-		low[i] = 0.02
+		low[i] = 0.005
 	}
 	u.SetSpectrum(low, true)
 	text = u.spectrum.GetText(false)
-	if strings.Contains(text, "·") {
-		t.Errorf("0.02 should render no lit dots, got %q", text)
+	if hasBrailleDot(text) {
+		t.Errorf("0.005 should render no lit dots, got %q", text)
 	}
 
 	// Inactive: fully blank, no dots and no truecolor codes at all.
@@ -189,7 +213,7 @@ func TestSetSpectrumRender(t *testing.T) {
 	if strings.Contains(text, "#") {
 		t.Errorf("inactive render should have no truecolor codes, got %q", text)
 	}
-	if strings.Contains(text, "·") {
+	if hasBrailleDot(text) {
 		t.Errorf("inactive render should show no dots at all, got %q", text)
 	}
 
