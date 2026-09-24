@@ -11,39 +11,9 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Color scheme: pale and muted, like btop's default theme - dark neutral
-// backgrounds, desaturated accent colors instead of saturated named colors.
-//
-//	header/status bars:  dark gray bg, pale gray foreground
-//	playing / progress:  muted teal
-//	directories:         muted teal
-//	errors:              muted red
-//	secondary/hints:     muted amber
-const (
-	colBarFill = "[#2a2a2a:#6b9b8f]"
-	colReset   = "[-:-]"
-	colAmber   = "[#c9b46b]" // replaces bright [yellow] tags
-	colTeal    = "[#6b9b9b]" // replaces bright [aqua]/[cyan] tags
-)
-
-var (
-	colHeader   = tcell.NewRGBColor(0x3a, 0x3a, 0x3a)
-	colPaleText = tcell.NewRGBColor(0xc0, 0xc0, 0xc0)
-	colError    = tcell.NewRGBColor(0xa8, 0x6b, 0x6b) // muted dusty red
-)
-
 const (
 	CoverArtWidth  = 32
 	CoverArtHeight = 16
-)
-
-// Border accent colors, one per panel (btop assigns each box its own
-// accent color rather than a single uniform border) - desaturated pastel
-// tones rather than tcell's saturated named colors.
-var (
-	borderColorPlaylist = tcell.NewRGBColor(0x6b, 0x9b, 0x9b) // muted teal
-	borderColorCoverArt = tcell.NewRGBColor(0xa8, 0x8b, 0xb5) // muted mauve
-	borderColorSpectrum = tcell.NewRGBColor(0x8f, 0xb0, 0x8a) // muted sage
 )
 
 func init() {
