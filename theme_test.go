@@ -127,3 +127,37 @@ func TestLoadThemeAppliesFile(t *testing.T) {
 		t.Errorf("colHeader = %q, want %q", got, "654321")
 	}
 }
+
+func TestSpectrumColorDefaultPalette(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{0.0, "5fb05f"},
+		{0.25, "87b05f"},
+		{0.5, "b0b05f"},
+		{0.75, "b0885f"},
+		{1.0, "b05f5f"},
+	}
+	for _, c := range cases {
+		if got := spectrumColor(c.v); got != c.want {
+			t.Errorf("spectrumColor(%v) = %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
+func TestSpectrumColorCustomKeyframes(t *testing.T) {
+	origLow, origMid, origHigh := spectrumLow, spectrumMid, spectrumHigh
+	t.Cleanup(func() { spectrumLow, spectrumMid, spectrumHigh = origLow, origMid, origHigh })
+
+	spectrumLow, _ = hexToColor("#000000")
+	spectrumMid, _ = hexToColor("#808080")
+	spectrumHigh, _ = hexToColor("#ffffff")
+
+	if got := spectrumColor(0.0); got != "000000" {
+		t.Errorf("spectrumColor(0.0) = %q, want %q", got, "000000")
+	}
+	if got := spectrumColor(1.0); got != "ffffff" {
+		t.Errorf("spectrumColor(1.0) = %q, want %q", got, "ffffff")
+	}
+}
