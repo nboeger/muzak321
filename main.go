@@ -163,7 +163,13 @@ func main() {
 	versionFlag := flag.Bool("v", false, "Show version")
 	flag.BoolVar(versionFlag, "version", false, "Show version")
 	shuffle := flag.Bool("s", false, "Shuffle playback")
+	debugGraphics := flag.Bool("debug-graphics", false, "Print graphics protocol detection info and exit")
 	flag.Parse()
+
+	// Normalize TERM early so graphics detection and other subsystems see the correct value
+	if term := normalizeTerm(os.Getenv("TERM")); term != os.Getenv("TERM") {
+		os.Setenv("TERM", term)
+	}
 
 	if *help {
 		printHelp()
@@ -175,8 +181,9 @@ func main() {
 		return
 	}
 
-	if term := normalizeTerm(os.Getenv("TERM")); term != os.Getenv("TERM") {
-		os.Setenv("TERM", term)
+	if *debugGraphics {
+		debugGraphicsProtocol()
+		return
 	}
 
 	loadTheme()

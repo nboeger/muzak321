@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -14,6 +15,39 @@ import (
 	"github.com/BourgeoisBear/rasterm"
 	"github.com/gdamore/tcell/v2"
 )
+
+// isKittyTerminal returns true if the current terminal is Kitty. In some
+// environments (sandboxed, confined), rasterm can't query capabilities, so we
+// also check the TERM variable directly as a fallback.
+func isKittyTerminal() bool {
+	// Kitty always sets KITTY_WINDOW_ID, even when TERM is remapped
+	if os.Getenv("KITTY_WINDOW_ID") != "" {
+		return true
+	}
+	// If TERM is explicitly set to kitty or xterm-kitty, trust it
+	term := os.Getenv("TERM")
+	if term == "kitty" || term == "xterm-kitty" {
+		return true
+	}
+	// Fall back to rasterm detection (may fail in sandboxed environments)
+	return rasterm.IsKittyCapable()
+}
+
+// debugGraphicsProtocol logs the graphics protocol detection results to stderr.
+// Useful for troubleshooting display issues.
+func debugGraphicsProtocol() {
+	kittyWinID := os.Getenv("KITTY_WINDOW_ID")
+	log.Printf("[DEBUG] Graphics protocol detection:")
+	log.Printf("  TERM=%s", os.Getenv("TERM"))
+	log.Printf("  KITTY_WINDOW_ID=%s", kittyWinID)
+	log.Printf("  isKittyTerminal()=%v", isKittyTerminal())
+	log.Printf("  rasterm.IsKittyCapable()=%v", rasterm.IsKittyCapable())
+	log.Printf("  rasterm.IsItermCapable()=%v", rasterm.IsItermCapable())
+	ok, _ := rasterm.IsSixelCapable()
+	log.Printf("  rasterm.IsSixelCapable()=%v", ok)
+	proto := detectGraphicsProtocol()
+	log.Printf("  Detected protocol: %q", proto)
+}
 
 // graphicsProtocol identifies which inline-image protocol the terminal
 // supports, detected once and cached (Sixel detection queries the terminal
@@ -26,7 +60,7 @@ var (
 func detectGraphicsProtocol() string {
 	gfxProtoOnce.Do(func() {
 		switch {
-		case rasterm.IsKittyCapable():
+		case isKittyTerminal():
 			gfxProto = "kitty"
 		case rasterm.IsItermCapable():
 			gfxProto = "iterm"
